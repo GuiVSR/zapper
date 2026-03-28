@@ -35,6 +35,19 @@ export interface WhatsAppClientConfig {
     stickersDir?: string; // Directory to save stickers
 }
 
+export interface MessageHistory {
+    id: string;
+    from: string;
+    to: string;
+    body: string;
+    timestamp: number;
+    type: string;
+    fromMe: boolean;
+    hasMedia: boolean;
+    author?: string;
+    isForwarded: boolean;
+}
+
 export class WhatsAppClient {
     private client: Client;
     private config: WhatsAppClientConfig;
@@ -49,7 +62,7 @@ export class WhatsAppClient {
         };
 
         this.stickersDir = this.config.stickersDir!;
-        
+
         // Create stickers directory if it doesn't exist
         if (!fs.existsSync(this.stickersDir)) {
             fs.mkdirSync(this.stickersDir, { recursive: true });
@@ -64,6 +77,130 @@ export class WhatsAppClient {
         });
 
         this.setupEventHandlers();
+    }
+
+    public async getChatHistory(chatId: string, limit: number = 50): Promise<MessageHistory[]> {
+        if (!this.isInitialized) {
+            throw new Error('Client not initialized. Call initialize() first.');
+        }
+
+        try {
+            // Format the chat ID properly
+            let formattedId = chatId;
+            if (!formattedId.includes('@') && !formattedId.includes('-')) {
+                formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
+            }
+
+            console.log(`📜 Fetching history for ${formattedId} (limit: ${limit})`);
+
+            // Get the chat
+            const chat = await this.client.getChatById(formattedId);
+
+            // Fetch messages
+            const messages = await chat.fetchMessages({ limit });
+
+            // Format messages for response
+            const history: MessageHistory[] = messages.map(msg => ({
+                id: msg.id.id,
+                from: msg.from,
+                to: msg.to,
+                body: msg.body || '',
+                timestamp: msg.timestamp,
+                type: msg.type,
+                fromMe: msg.fromMe,
+                hasMedia: msg.hasMedia,
+                author: msg.author,
+                isForwarded: msg.isForwarded || false
+            }));
+
+            console.log(`✅ Retrieved ${history.length} messages`);
+            return history;
+        } catch (error) {
+            console.error(`❌ Failed to fetch chat history:`, error);
+            throw error;
+        }
+    }
+
+    public async getAllChatsWithMessages(limit: number = 10): Promise<Map<string, MessageHistory[]>> {
+        if (!this.isInitialized) {
+            throw new Error('Client not initialized. Call initialize() first.');
+        }
+
+        try {
+            console.log(`📜 Fetching all chats with latest messages...`);
+
+            const chats = await this.client.getChats();
+            const chatHistory = new Map<string, MessageHistory[]>();
+
+            for (const chat of chats.slice(0, limit)) {
+                const messages = await chat.fetchMessages({ limit: 20 });
+                const formattedMessages: MessageHistory[] = messages.map(msg => ({
+                    id: msg.id.id,
+                    from: msg.from,
+                    to: msg.to,
+                    body: msg.body || '',
+                    timestamp: msg.timestamp,
+                    type: msg.type,
+                    fromMe: msg.fromMe,
+                    hasMedia: msg.hasMedia,
+                    author: msg.author,
+                    isForwarded: msg.isForwarded || false
+                }));
+
+                chatHistory.set(chat.id._serialized, formattedMessages);
+            }
+
+            console.log(`✅ Retrieved history for ${chatHistory.size} chats`);
+            return chatHistory;
+        } catch (error) {
+            console.error(`❌ Failed to fetch all chats history:`, error);
+            throw error;
+        }
+    }
+
+    public async searchMessages(query: string, limit: number = 50): Promise<MessageHistory[]> {
+        if (!this.isInitialized) {
+            throw new Error('Client not initialized. Call initialize() first.');
+        }
+
+        try {
+            console.log(`🔍 Searching messages for: "${query}"`);
+
+            const chats = await this.client.getChats();
+            const matchingMessages: MessageHistory[] = [];
+
+            for (const chat of chats) {
+                const messages = await chat.fetchMessages({ limit: 100 });
+
+                const matches = messages
+                    .filter(msg => msg.body && msg.body.toLowerCase().includes(query.toLowerCase()))
+                    .map(msg => ({
+                        id: msg.id.id,
+                        from: msg.from,
+                        to: msg.to,
+                        body: msg.body || '',
+                        timestamp: msg.timestamp,
+                        type: msg.type,
+                        fromMe: msg.fromMe,
+                        hasMedia: msg.hasMedia,
+                        author: msg.author,
+                        isForwarded: msg.isForwarded || false
+                    }));
+
+                matchingMessages.push(...matches);
+
+                if (matchingMessages.length >= limit) break;
+            }
+
+            // Sort by timestamp descending
+            matchingMessages.sort((a, b) => b.timestamp - a.timestamp);
+
+            console.log(`✅ Found ${matchingMessages.length} matching messages`);
+            return matchingMessages.slice(0, limit);
+        } catch (error) {
+            console.error(`❌ Failed to search messages:`, error);
+            throw error;
+        }
     }
 
     private setupEventHandlers(): void {
@@ -93,7 +230,7 @@ export class WhatsAppClient {
             if (message.type === 'sticker') {
                 await this.handleSticker(message);
             }
-            
+
             // Pass to regular message handler if provided
             if (this.config.onMessage) {
                 this.config.onMessage(message);
@@ -133,7 +270,7 @@ export class WhatsAppClient {
         try {
             // Download sticker media
             const media = await message.downloadMedia();
-            
+
             if (!media) {
                 console.error('Failed to download sticker media');
                 return;
@@ -141,10 +278,10 @@ export class WhatsAppClient {
 
             // Convert base64 to buffer
             const buffer = Buffer.from(media.data, 'base64');
-            
+
             // Determine if it's animated (webp with multiple frames or video)
             const isAnimated = media.mimetype === 'image/webp' && await this.isAnimatedWebp(buffer);
-            
+
             // Get sticker info
             const stickerInfo: StickerInfo = {
                 message,
@@ -170,7 +307,7 @@ export class WhatsAppClient {
             const filename = `sticker_${timestamp}_${message.id.id}.webp`;
             const filepath = path.join(this.stickersDir, filename);
             fs.writeFileSync(filepath, buffer);
-            
+
             stickerInfo['savedPath'] = filepath;
 
             // Call sticker handler if provided
@@ -207,7 +344,7 @@ export class WhatsAppClient {
         if ('savedPath' in stickerInfo) {
             console.log(`Saved to: ${stickerInfo.savedPath}`);
         }
-        
+
         // ASCII art representation (simplified)
         console.log('\n[Sticker Preview]');
         console.log('┌─────────────────┐');
@@ -223,35 +360,72 @@ export class WhatsAppClient {
             console.warn('Client is already initialized');
             return;
         }
-        
+
         console.log('🚀 Initializing WhatsApp client...');
         this.client.initialize();
+    }
+
+    public async sendMessage(to: string, message: string): Promise<any> {
+        if (!this.isInitialized) {
+            throw new Error('Client not initialized. Call initialize() first.');
+        }
+
+        try {
+            // Format the chat ID properly
+            let chatId = to;
+
+            // If it's a phone number without @c.us, add it
+            if (!chatId.includes('@') && !chatId.includes('-')) {
+                // Remove any non-numeric characters except +
+                chatId = chatId.replace(/[^0-9+]/g, '');
+                chatId = `${chatId}@c.us`;
+            }
+
+            console.log(`📤 Sending message to ${chatId}: ${message}`);
+
+            // Get the chat
+            const chat = await this.client.getChatById(chatId);
+
+            // Send the message
+            const result = await chat.sendMessage(message);
+
+            console.log(`✅ Message sent successfully!`);
+            return result;
+        } catch (error) {
+            console.error(`❌ Failed to send message to ${to}:`, error);
+            throw error;
+        }
     }
 
     public async sendSticker(to: string, stickerPath: string): Promise<void> {
         if (!this.isInitialized) {
             throw new Error('Client not initialized. Call initialize() first.');
         }
-        
-        const media = MessageMedia.fromFilePath(stickerPath);
-        const chat = await this.client.getChatById(to);
-        await chat.sendMessage(media, { sendMediaAsSticker: true });
+
+        try {
+            // Format the chat ID properly
+            let chatId = to;
+            if (!chatId.includes('@') && !chatId.includes('-')) {
+                chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
+            }
+
+            const media = MessageMedia.fromFilePath(stickerPath);
+            const chat = await this.client.getChatById(chatId);
+            await chat.sendMessage(media, { sendMediaAsSticker: true });
+
+            console.log(`✅ Sticker sent successfully to ${chatId}`);
+        } catch (error) {
+            console.error(`❌ Failed to send sticker to ${to}:`, error);
+            throw error;
+        }
     }
 
-    public async sendMessage(to: string, message: string): Promise<void> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
-        
-        const chat = await this.client.getChatById(to);
-        await chat.sendMessage(message);
-    }
 
     public async getContactInfo(contactId: string) {
         if (!this.isInitialized) {
             throw new Error('Client not initialized. Call initialize() first.');
         }
-        
+
         try {
             const contact = await this.client.getContactById(contactId);
             return {
@@ -271,15 +445,17 @@ export class WhatsAppClient {
         if (!this.isInitialized) {
             throw new Error('Client not initialized. Call initialize() first.');
         }
-        
+
         return await this.client.getChats();
     }
+
+
 
     public async logout(): Promise<void> {
         if (!this.isInitialized) {
             return;
         }
-        
+
         await this.client.logout();
         this.isInitialized = false;
     }

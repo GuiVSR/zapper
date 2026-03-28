@@ -31,15 +31,25 @@ module.exports = {
         })
     ],
     devServer: {
+        client: { overlay: false },
         static: {
             directory: path.join(__dirname, 'dist/public'),
         },
-        port: 3000,
+        port: 3001,
         hot: true,
         proxy: {
+            '/api': {
+                target: 'http://localhost:3000',
+                changeOrigin: true,
+                secure: false,
+                ws: true,
+                pathRewrite: { '^/api': '/api' }  // Keep the /api prefix
+            },
             '/socket.io': {
-                target: 'http://localhost:3001',
-                ws: true
+                target: 'http://localhost:3000',
+                ws: true,
+                changeOrigin: true,
+                secure: false
             }
         }
     }
