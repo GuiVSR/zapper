@@ -139,11 +139,13 @@ app.get('/api/history/:chatId', async (req, res) => {
         }
         
         const history = await whatsappClient.getChatHistory(chatId, limit);
+
+        const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
         
         res.json({
             chatId,
-            count: history.length,
-            messages: history
+            count: sortedHistory.length,
+            messages: sortedHistory
         });
     } catch (error: any) {
         console.error('Error fetching history:', error);

@@ -37,20 +37,14 @@ module.exports = {
         },
         port: 3001,
         hot: true,
-        proxy: {
-            '/api': {
-                target: 'http://localhost:3000',
-                changeOrigin: true,
-                secure: false,
-                ws: true,
-                pathRewrite: { '^/api': '/api' }  // Keep the /api prefix
-            },
-            '/socket.io': {
+        proxy: [
+            {
+                context: ['/socket.io', '/api'],  // Add '/api' to the proxy context
                 target: 'http://localhost:3000',
                 ws: true,
                 changeOrigin: true,
                 secure: false
             }
-        }
+        ]
     }
 };

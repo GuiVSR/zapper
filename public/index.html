@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Chat Viewer</title>
+    <title>Zapper</title>
     <style>
         * {
             margin: 0;
@@ -271,7 +271,7 @@
         <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
-                <h2>WhatsApp Chats</h2>
+                <h2>ZAPPER</h2>
                 <div id="connectionStatus" class="status-badge status-disconnected">Disconnected</div>
             </div>
             <div class="search-box">
@@ -456,7 +456,7 @@
                 addDebugLog(`Loaded ${data.count || 0} messages`);
                 
                 if (data.messages && data.messages.length > 0) {
-                    displayMessages(data.messages);
+                    displayMessages(data.messages.reverse());
                 } else {
                     document.getElementById('messagesContainer').innerHTML = '<div class="empty-state">No messages yet. Start a conversation!</div>';
                     addDebugLog('No messages found in this chat');

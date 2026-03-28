@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
 
@@ -32,8 +32,22 @@ function App() {
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
 
+    // Reference for auto-scrolling
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+
     // Backend server URL (your server is on port 3000)
     const API_BASE_URL = 'http://localhost:3000';
+
+    // Auto-scroll to bottom function
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    // Scroll to bottom when messages change
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
 
     useEffect(() => {
         // Connect to Socket.IO server on port 3000
@@ -121,7 +135,6 @@ function App() {
         }
     };
 
-    // Load chat history for selected chat - using absolute URL
     const loadChatHistory = async (chatId: string) => {
         setLoadingHistory(true);
         setError('');
@@ -135,7 +148,7 @@ function App() {
             
             const data = await response.json();
             console.log('History loaded:', data);
-            // Reverse to show oldest first
+            console.log(data.messages.reverse())
             setMessages(data.messages.reverse());
         } catch (error: any) {
             console.error('Error loading chat history:', error);
@@ -146,7 +159,6 @@ function App() {
         }
     };
 
-    // Handle chat selection
     const handleSelectChat = (chat: Chat) => {
         console.log('Selected chat:', chat);
         setSelectedChat(chat);
@@ -179,7 +191,6 @@ function App() {
             const result = await response.json();
             console.log('Message sent:', result);
             
-            // Add sent message to the chat
             const sentMessage: Message = {
                 id: Date.now().toString(),
                 from: 'me',
@@ -205,7 +216,7 @@ function App() {
     return (
         <div className="App">
             <header className="App-header">
-                <h1>WhatsApp Message Viewer</h1>
+                <h1>Zapper</h1>
                 <div className="status">Status: {status}</div>
                 {error && <div className="error-message">⚠️ {error}</div>}
             </header>
@@ -259,7 +270,7 @@ function App() {
                                 {loadingHistory && <div className="loading">Loading messages...</div>}
                             </div>
                             
-                            <div className="messages-section">
+                            <div className="messages-section" ref={messagesContainerRef}>
                                 <div className="messages-list">
                                     {messages.length === 0 && !loadingHistory && (
                                         <div className="no-messages">No messages yet. Start a conversation!</div>
@@ -276,6 +287,8 @@ function App() {
                                             </div>
                                         </div>
                                     ))}
+                                    {/* Empty div for auto-scrolling reference */}
+                                    <div ref={messagesEndRef} />
                                 </div>
                             </div>
 
