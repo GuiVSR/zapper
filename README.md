@@ -25,7 +25,7 @@ A WhatsApp web client with AI-powered reply drafting. Messages from each custome
 ## Installation
 
 ```bash
-git clone https://github.com/GuiVSR/zapper
+git clone <your-repo-url>
 cd zapper
 npm install
 ```
@@ -43,8 +43,16 @@ GROQ_MODEL=llama-3.3-70b-versatile
 GROQ_MAX_TOKENS=250
 GROQ_TEMPERATURE=0.7
 
+# ── AI system prompt ──────────────────────────────────────────────────────────
+# Optional. If set, overrides the default prompt in src/constants.ts.
+# Use this to describe your business, tone, language, and any rules.
+# SYSTEM_PROMPT=You are a support agent for Acme Ltd. Always reply in Portuguese, be concise and friendly.
+
 # ── Optional: webhook URL to forward inbound messages to ──────────────────────
 # WEBHOOK_URL=https://your-endpoint.com/webhook
+
+# ── Optional: server port (default: 3000) ─────────────────────────────────────
+# PORT=3000
 
 # ── Optional: alternative LLMs (swap import in messageHandler.ts to use) ─────
 # DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -56,6 +64,11 @@ GROQ_TEMPERATURE=0.7
 # KIMI_MODEL=moonshot-v1-8k
 # KIMI_MAX_TOKENS=250
 # KIMI_TEMPERATURE=0.7
+
+# GEMINI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# GEMINI_MODEL=gemini-2.0-flash
+# GEMINI_MAX_TOKENS=250
+# GEMINI_TEMPERATURE=0.7
 ```
 
 ### Available Groq models
@@ -114,7 +127,7 @@ Your session is saved locally in `.wwebjs_auth/` so you only need to scan once. 
 
 ### Customising the AI prompt
 
-Open `src/llm/groq.ts` and edit `DEFAULT_SYSTEM_PROMPT` to add your business context, tone of voice, language preferences, etc.
+Set `SYSTEM_PROMPT` in your `.env` file — no code changes needed. If `SYSTEM_PROMPT` is not set, the fallback defined in `src/constants.ts` (`DEFAULT_SYSTEM_PROMPT`) is used instead.
 
 ---
 
