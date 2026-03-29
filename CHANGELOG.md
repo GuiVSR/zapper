@@ -2,6 +2,24 @@
 
 All notable changes to Zapper will be documented here.
 
+## [1.1.0] — 2026-03-29
+
+**Author:** GuiVSR
+
+### On-demand AI draft generation & multi-chat selection
+
+#### Added
+- **Manual draft button** (`🤖`) in the input bar — generate an AI draft for the open chat at any time, without waiting for the automatic 10-second pool window
+- **Multi-chat selection mode** — toggle with the `☑ Select` button in the sidebar; check multiple chats and generate one draft per chat in a single action
+- **Message limit input** in the sidebar toolbar — controls how many recent messages are sent to the AI for any generation (single or multi); defaults to `HISTORY_CONTEXT` from `constants.ts` and can be overridden per-session in the UI
+- `POST /api/generate-drafts` endpoint — accepts `{ chatIds, limit }` and fires async draft generation; results are delivered via the existing `ai_draft` socket event
+- `generateDraftsForChats()` public method on `MessageHandler` — fetches history and calls Groq for each requested chat
+
+#### Changed
+- `HISTORY_CONTEXT` in `constants.ts` is now the single source of truth for the default message limit, used by both the pooling logic and the UI input initial value
+- `SYSTEM_PROMPT` env var added — overrides `DEFAULT_SYSTEM_PROMPT` in `constants.ts` without touching code; all LLM clients read it via `getSystemPrompt()`
+- All project-wide magic values centralised into `src/constants.ts` (API URLs, model names, pool window, limits, colours, favicon size, system prompt)
+
 ---
 
 ## [1.0.0] — 2026-03-29
@@ -25,6 +43,8 @@ First working version of Zapper, a WhatsApp Web client with AI-powered reply dra
 - Bot commands: `/ping`, `/help`, `/status`, `/chats`
 - Optional webhook forwarding for inbound messages
 - Blue UI theme
+
+---
 
 ---
 

@@ -29,224 +29,212 @@ interface AIDraft {
     generatedAt: number;
 }
 
-
-// ── Favicon: blue circle with pending draft count ─────────────────────────────
+// ── Favicon ───────────────────────────────────────────────────────────────────
 function updateFavicon(count: number): void {
     const canvas = document.createElement('canvas');
     canvas.width  = FAVICON_SIZE;
     canvas.height = FAVICON_SIZE;
     const ctx = canvas.getContext('2d')!;
-
-    // Blue circle
     ctx.beginPath();
     ctx.arc(FAVICON_SIZE / 2, FAVICON_SIZE / 2, FAVICON_SIZE / 2 - 1, 0, 2 * Math.PI);
     ctx.fillStyle = FAVICON_COLOR;
     ctx.fill();
-
+    ctx.fillStyle = 'white';
     if (count > 0) {
-        // White number
-        ctx.fillStyle = 'white';
         ctx.font = `bold ${count > 9 ? '14' : '18'}px sans-serif`;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(count > 99 ? '99+' : String(count), FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
     } else {
-        // White Z when no drafts pending
-        ctx.fillStyle = 'white';
         ctx.font = 'bold 18px sans-serif';
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('Z', FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
     }
-
     const link = document.getElementById('favicon') as HTMLLinkElement;
     if (link) link.href = canvas.toDataURL('image/png');
 }
 
 function App() {
-    const [messages, setMessages]             = useState<Message[]>([]);
-    const [qrCode, setQrCode]                 = useState<string>('');
-    const [status, setStatus]                 = useState<string>('Connecting...');
-    const [chats, setChats]                   = useState<Chat[]>([]);
-    const [selectedChat, setSelectedChat]     = useState<Chat | null>(null);
-    const [messageInput, setMessageInput]     = useState<string>('');
-    const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
-    const [error, setError]                   = useState<string>('');
-    // Map of chatId → pending AI draft
-    const [drafts, setDrafts]                 = useState<Record<string, AIDraft>>({});
+    const [messages, setMessages]           = useState<Message[]>([]);
+    const [qrCode, setQrCode]               = useState<string>('');
+    const [status, setStatus]               = useState<string>('Connecting...');
+    const [chats, setChats]                 = useState<Chat[]>([]);
+    const [selectedChat, setSelectedChat]   = useState<Chat | null>(null);
+    const [messageInput, setMessageInput]   = useState<string>('');
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const [error, setError]                 = useState<string>('');
+    const [drafts, setDrafts]               = useState<Record<string, AIDraft>>({});
 
-    // Keep favicon in sync with pending draft count
-    useEffect(() => {
-        updateFavicon(Object.keys(drafts).length);
-    }, [drafts]);
+    // Multi-select
+    const [multiSelectMode, setMultiSelectMode] = useState(false);
+    const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(new Set());
+    const [multiGenerating, setMultiGenerating] = useState(false);
 
-    const socketRef          = useRef<any>(null);
-    const selectedChatRef    = useRef<Chat | null>(null);
-    const messagesEndRef     = useRef<HTMLDivElement>(null);
+    // Per-chat on-demand generation
+    const [generatingDraft, setGeneratingDraft] = useState(false);
 
+    // Shared message limit
+    const [messageLimit, setMessageLimit] = useState(10);
+
+    const socketRef       = useRef<any>(null);
+    const selectedChatRef = useRef<Chat | null>(null);
+    const messagesEndRef  = useRef<HTMLDivElement>(null);
 
     useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
-
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+    useEffect(() => { updateFavicon(Object.keys(drafts).length); }, [drafts]);
 
     useEffect(() => {
         const socket = io(API_BASE_URL, { transports: ['websocket'] });
         socketRef.current = socket;
 
-        socket.on('connect', () => {
-            setStatus('Connected to server');
-            setError('');
-        });
+        socket.on('connect',    () => { setStatus('Connected to server'); setError(''); });
         socket.on('disconnect', (reason: string) => setStatus(`Disconnected: ${reason}`));
-        socket.on('qr', (data: { qr: string }) => {
-            setQrCode(data.qr);
-            setStatus('Scan QR code with WhatsApp');
-        });
-        socket.on('ready', (data: { message: string }) => {
-            setStatus(data.message);
-            setQrCode('');
-            loadChats();
-        });
-        socket.on('client_ready', (data: { message: string }) => {
-            setStatus(data.message);
-            loadChats();
-        });
+        socket.on('qr', (data: { qr: string }) => { setQrCode(data.qr); setStatus('Scan QR code with WhatsApp'); });
+        socket.on('ready',        (data: { message: string }) => { setStatus(data.message); setQrCode(''); loadChats(); });
+        socket.on('client_ready', (data: { message: string }) => { setStatus(data.message); loadChats(); });
         socket.on('message', (message: Message) => {
-            const currentChat = selectedChatRef.current;
-
-            // Append to open chat's message list
-            if (currentChat && (message.from === currentChat.id || message.to === currentChat.id)) {
+            const cur = selectedChatRef.current;
+            if (cur && (message.from === cur.id || message.to === cur.id)) {
                 setMessages(prev => [...prev, message]);
             }
-
-            // Update sidebar: bump chat to top + increment unread if not currently open
             if (!message.fromMe) {
-                const incomingChatId = message.from;
                 setChats(prev => {
-                    const idx = prev.findIndex(c => c.id === incomingChatId);
-                    if (idx === -1) return prev; // unknown chat — will appear on next full load
+                    const idx = prev.findIndex(c => c.id === message.from);
+                    if (idx === -1) return prev;
                     const updated = { ...prev[idx] };
-                    if (currentChat?.id !== incomingChatId) {
-                        updated.unreadCount = (updated.unreadCount ?? 0) + 1;
-                    }
-                    const rest = prev.filter((_, i) => i !== idx);
-                    return [updated, ...rest];
+                    if (cur?.id !== message.from) updated.unreadCount = (updated.unreadCount ?? 0) + 1;
+                    return [updated, ...prev.filter((_, i) => i !== idx)];
                 });
             }
         });
-        socket.on('chats_list', (chatsList: Chat[]) => setChats(chatsList));
-        socket.on('auth_failure', (data: { message: string }) => {
-            setStatus(`Auth failed: ${data.message}`);
-            setError(data.message);
-        });
-        socket.on('error', (err: any) => setError(err?.message || 'Socket error'));
-
-        // ── AI draft handler ──────────────────────────────────────────────────
+        socket.on('chats_list',   (list: Chat[]) => setChats(list));
+        socket.on('auth_failure', (data: { message: string }) => { setStatus(`Auth failed: ${data.message}`); setError(data.message); });
+        socket.on('error',        (err: any) => setError(err?.message || 'Socket error'));
         socket.on('ai_draft', (draft: AIDraft) => {
-            console.log('🤖 AI draft received for', draft.chatId);
             setDrafts(prev => ({ ...prev, [draft.chatId]: draft }));
-
-            // If the draft chat is not currently open, increment a visual indicator
-            // (the badge on the sidebar already handles unread; here we just store it)
+            setGeneratingDraft(false);
+            setMultiGenerating(false);
         });
 
         return () => { socket.disconnect(); };
     }, []);
 
+    // ── Data ──────────────────────────────────────────────────────────────────
+
     const loadChats = async () => {
         try {
             setStatus('Loading chats...');
-            const response = await fetch(`${API_BASE_URL}/api/chats`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            setChats(await response.json());
+            const res = await fetch(`${API_BASE_URL}/api/chats`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setChats(await res.json());
             setStatus('WhatsApp ready');
-        } catch (err: any) {
-            setError(err.message);
-            setStatus('Error loading chats');
-        }
+        } catch (err: any) { setError(err.message); setStatus('Error loading chats'); }
     };
 
     const loadChatHistory = async (chatId: string) => {
-        setLoadingHistory(true);
-        setError('');
+        setLoadingHistory(true); setError('');
         try {
-            const response = await fetch(
-                `${API_BASE_URL}/api/history/${encodeURIComponent(chatId)}?limit=50`
-            );
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            setMessages(data.messages);
-        } catch (err: any) {
-            setError(err.message);
-            setMessages([]);
-        } finally {
-            setLoadingHistory(false);
-        }
+            const res = await fetch(`${API_BASE_URL}/api/history/${encodeURIComponent(chatId)}?limit=50`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setMessages((await res.json()).messages);
+        } catch (err: any) { setError(err.message); setMessages([]); }
+        finally { setLoadingHistory(false); }
     };
 
+    // ── Chat selection ────────────────────────────────────────────────────────
+
     const handleSelectChat = (chat: Chat) => {
+        if (multiSelectMode) {
+            setSelectedChatIds(prev => {
+                const next = new Set(prev);
+                next.has(chat.id) ? next.delete(chat.id) : next.add(chat.id);
+                return next;
+            });
+            return;
+        }
         setSelectedChat(chat);
         loadChatHistory(chat.id);
-        // Clear unread badge when opening a chat
         setChats(prev => prev.map(c => c.id === chat.id ? { ...c, unreadCount: 0 } : c));
     };
+
+    const toggleMultiSelect = () => {
+        setMultiSelectMode(prev => !prev);
+        setSelectedChatIds(new Set());
+    };
+
+    // ── Messaging ─────────────────────────────────────────────────────────────
 
     const sendMessage = async (text?: string) => {
         if (!selectedChat) return;
         const body = (text ?? messageInput).trim();
         if (!body) return;
-
         try {
             await fetch(`${API_BASE_URL}/api/send-message`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ to: selectedChat.id, message: body }),
             });
-            setMessages(prev => [
-                ...prev,
-                {
-                    id: Date.now().toString(),
-                    from: 'me',
-                    to: selectedChat.id,
-                    body,
-                    timestamp: Math.floor(Date.now() / 1000),
-                    type: 'chat',
-                    fromMe: true,
-                },
-            ]);
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(), from: 'me', to: selectedChat.id,
+                body, timestamp: Math.floor(Date.now() / 1000), type: 'chat', fromMe: true,
+            }]);
             setMessageInput('');
-        } catch (err: any) {
-            setError(err.message);
-        }
+        } catch (err: any) { setError(err.message); }
     };
 
-    // Loads draft into the input box for editing before sending
+    // ── Draft actions ─────────────────────────────────────────────────────────
+
     const editDraft = () => {
         if (!selectedChat) return;
-        const draft = drafts[selectedChat.id];
-        if (!draft) return;
-        setMessageInput(draft.draft);
+        const d = drafts[selectedChat.id];
+        if (!d) return;
+        setMessageInput(d.draft);
         discardDraft();
     };
 
-    // Sends the draft immediately with one click
     const sendDraft = async () => {
         if (!selectedChat) return;
-        const draft = drafts[selectedChat.id];
-        if (!draft) return;
+        const d = drafts[selectedChat.id];
+        if (!d) return;
         discardDraft();
-        await sendMessage(draft.draft);
+        await sendMessage(d.draft);
     };
 
-    const discardDraft = () => {
-        if (!selectedChat) return;
-        setDrafts(prev => {
-            const next = { ...prev };
-            delete next[selectedChat.id];
-            return next;
-        });
+    const discardDraft = (chatId?: string) => {
+        const id = chatId ?? selectedChat?.id;
+        if (!id) return;
+        setDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
+    };
+
+    // ── On-demand generation ──────────────────────────────────────────────────
+
+    const generateDraftForCurrentChat = async () => {
+        if (!selectedChat || generatingDraft) return;
+        setGeneratingDraft(true);
+        try {
+            await fetch(`${API_BASE_URL}/api/generate-drafts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatIds: [selectedChat.id], limit: messageLimit }),
+            });
+        } catch (err: any) { setError(err.message); setGeneratingDraft(false); }
+    };
+
+    const generateDraftsForSelected = async () => {
+        if (selectedChatIds.size === 0 || multiGenerating) return;
+        setMultiGenerating(true);
+        try {
+            await fetch(`${API_BASE_URL}/api/generate-drafts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatIds: Array.from(selectedChatIds), limit: messageLimit }),
+            });
+            setTimeout(() => setMultiGenerating(false), 30_000);
+        } catch (err: any) { setError(err.message); setMultiGenerating(false); }
+        setMultiSelectMode(false);
+        setSelectedChatIds(new Set());
     };
 
     const formatTimestamp = (ts: number) =>
@@ -264,10 +252,7 @@ function App() {
             {qrCode && (
                 <div className="qr">
                     <h3>Scan QR Code</h3>
-                    <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`}
-                        alt="WhatsApp QR Code"
-                    />
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`} alt="QR" />
                 </div>
             )}
 
@@ -276,26 +261,72 @@ function App() {
             <div className="layout">
                 {/* SIDEBAR */}
                 <div className="sidebar">
+
+                    {/* Toolbar */}
+                    <div className="sidebar-toolbar">
+                        <div className="limit-control">
+                            <label htmlFor="msg-limit">Messages</label>
+                            <input
+                                id="msg-limit"
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={messageLimit}
+                                onChange={e => setMessageLimit(Math.max(1, parseInt(e.target.value) || 1))}
+                            />
+                        </div>
+                        <button
+                            className={`btn-multiselect ${multiSelectMode ? 'active' : ''}`}
+                            onClick={toggleMultiSelect}
+                            title="Select multiple chats to generate drafts"
+                        >
+                            {multiSelectMode ? '✕ Cancel' : '☑ Select'}
+                        </button>
+                    </div>
+
+                    {/* Multi-select action bar */}
+                    {multiSelectMode && (
+                        <div className="multi-generate-bar">
+                            <span className="multi-count">
+                                {selectedChatIds.size === 0
+                                    ? 'Select chats below'
+                                    : `${selectedChatIds.size} chat${selectedChatIds.size > 1 ? 's' : ''} selected`}
+                            </span>
+                            <button
+                                className="btn-generate-multi"
+                                disabled={selectedChatIds.size === 0 || multiGenerating}
+                                onClick={generateDraftsForSelected}
+                            >
+                                {multiGenerating ? '⏳ Generating…' : '🤖 Generate'}
+                            </button>
+                        </div>
+                    )}
+
                     <div className="chat-list">
                         {chats.map(chat => (
                             <div
                                 key={chat.id}
-                                className={`chat-item ${selectedChat?.id === chat.id ? 'active' : ''}`}
+                                className={[
+                                    'chat-item',
+                                    !multiSelectMode && selectedChat?.id === chat.id ? 'active' : '',
+                                    multiSelectMode && selectedChatIds.has(chat.id) ? 'multi-selected' : '',
+                                ].filter(Boolean).join(' ')}
                                 onClick={() => handleSelectChat(chat)}
                             >
+                                {multiSelectMode && (
+                                    <div className={`chat-checkbox ${selectedChatIds.has(chat.id) ? 'checked' : ''}`}>
+                                        {selectedChatIds.has(chat.id) && '✓'}
+                                    </div>
+                                )}
                                 <div className="chat-meta">
                                     <div className="chat-name">{chat.name || chat.id}</div>
                                     <div className="chat-preview">
-                                        {drafts[chat.id]
-                                            ? '🤖 Draft ready'
-                                            : 'Click to open'}
+                                        {drafts[chat.id] ? '🤖 Draft ready' : 'Click to open'}
                                     </div>
                                 </div>
                                 <div className="chat-badges">
                                     {drafts[chat.id] && <span className="badge badge-ai">AI</span>}
-                                    {chat.unreadCount > 0 && (
-                                        <span className="badge">{chat.unreadCount}</span>
-                                    )}
+                                    {chat.unreadCount > 0 && <span className="badge">{chat.unreadCount}</span>}
                                 </div>
                             </div>
                         ))}
@@ -304,7 +335,7 @@ function App() {
 
                 {/* CHAT AREA */}
                 <div className="chat-area">
-                    {selectedChat ? (
+                    {selectedChat && !multiSelectMode ? (
                         <>
                             <div className="chat-header">
                                 {selectedChat.name || selectedChat.id}
@@ -313,10 +344,7 @@ function App() {
 
                             <div className="messages">
                                 {messages.map((msg, i) => (
-                                    <div
-                                        key={msg.id || i}
-                                        className={`bubble ${msg.fromMe ? 'sent' : 'received'}`}
-                                    >
+                                    <div key={msg.id || i} className={`bubble ${msg.fromMe ? 'sent' : 'received'}`}>
                                         <div>{msg.body}</div>
                                         <span className="time">{formatTimestamp(msg.timestamp)}</span>
                                     </div>
@@ -324,26 +352,17 @@ function App() {
                                 <div ref={messagesEndRef} />
                             </div>
 
-                            {/* ── AI Draft banner ── */}
                             {currentDraft && (
                                 <div className="draft-banner">
                                     <div className="draft-header">
                                         <span className="draft-label">🤖 AI Draft</span>
-                                        <span className="draft-time">
-                                            {formatTimestamp(currentDraft.generatedAt)}
-                                        </span>
+                                        <span className="draft-time">{formatTimestamp(currentDraft.generatedAt)}</span>
                                     </div>
                                     <div className="draft-body">{currentDraft.draft}</div>
                                     <div className="draft-actions">
-                                        <button className="btn-send" onClick={sendDraft}>
-                                            ✅ Send
-                                        </button>
-                                        <button className="btn-edit" onClick={editDraft}>
-                                            ✏️ Edit
-                                        </button>
-                                        <button className="btn-discard" onClick={discardDraft}>
-                                            ✕ Discard
-                                        </button>
+                                        <button className="btn-send"    onClick={sendDraft}>✅ Send</button>
+                                        <button className="btn-edit"    onClick={editDraft}>✏️ Edit</button>
+                                        <button className="btn-discard" onClick={() => discardDraft()}>✕ Discard</button>
                                     </div>
                                 </div>
                             )}
@@ -355,11 +374,23 @@ function App() {
                                     onKeyDown={e => e.key === 'Enter' && sendMessage()}
                                     placeholder="Type a message"
                                 />
+                                <button
+                                    className="btn-generate-single"
+                                    onClick={generateDraftForCurrentChat}
+                                    disabled={generatingDraft}
+                                    title={`Generate AI draft from last ${messageLimit} messages`}
+                                >
+                                    {generatingDraft ? '⏳' : '🤖'}
+                                </button>
                                 <button onClick={() => sendMessage()}>Send</button>
                             </div>
                         </>
                     ) : (
-                        <div className="empty">Select a chat to start messaging</div>
+                        <div className="empty">
+                            {multiSelectMode
+                                ? 'Select chats in the sidebar, then click Generate'
+                                : 'Select a chat to start messaging'}
+                        </div>
                     )}
                 </div>
             </div>

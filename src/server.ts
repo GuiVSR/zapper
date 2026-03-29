@@ -208,6 +208,23 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
+// Generate AI draft on demand for one or more chats
+// Body: { chatIds: string[], limit: number }
+app.post('/api/generate-drafts', async (req, res) => {
+    const { chatIds, limit } = req.body;
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!Array.isArray(chatIds) || chatIds.length === 0) return res.status(400).json({ error: 'Missing or empty "chatIds" array' });
+
+    const messageLimit = typeof limit === 'number' && limit > 0 ? limit : 10;
+
+    // Fire off one draft per chat — results are emitted as ai_draft socket events
+    // so the frontend receives them the same way as pooled drafts.
+    messageHandler.generateDraftsForChats(chatIds, messageLimit)
+        .catch(err => console.error('[Server] generate-drafts error:', err));
+
+    res.json({ accepted: chatIds.length, limit: messageLimit });
+});
+
 // ── Static file serving ───────────────────────────────────────────────────────
 const publicPath = path.join(__dirname, '../public');
 app.use(express.static(publicPath));

@@ -214,6 +214,34 @@ export class MessageHandler {
         }
     }
 
+
+    /**
+     * On-demand draft generation — called by the API endpoint.
+     * Fetches the last `limit` messages for each chatId and fires onDraft for each.
+     */
+    public async generateDraftsForChats(chatIds: string[], limit: number): Promise<void> {
+        for (const chatId of chatIds) {
+            try {
+                const history = await this.client.getChatHistory(chatId, limit);
+                if (history.length === 0) continue;
+
+                const groq  = getGroqClient();
+                const draft = await groq.generateWhatsAppDraft(history);
+
+                this.onDraft?.({
+                    chatId,
+                    draft,
+                    basedOnMessages: history,
+                    generatedAt: Math.floor(Date.now() / 1000),
+                });
+
+                console.log(chalk.blue(`[OnDemand] Draft generated for ${chatId} (${history.length} messages)`));
+            } catch (err) {
+                console.error(chalk.red(`[OnDemand] Failed for ${chatId}:`), err);
+            }
+        }
+    }
+
     /** Cancel all pending timers — call this on server shutdown. */
     public destroy(): void {
         for (const timer of this.timers.values()) clearTimeout(timer);
