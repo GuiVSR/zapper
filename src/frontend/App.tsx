@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
+import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR } from '../constants';
 
 interface Message {
     id: string;
@@ -32,14 +33,14 @@ interface AIDraft {
 // ── Favicon: blue circle with pending draft count ─────────────────────────────
 function updateFavicon(count: number): void {
     const canvas = document.createElement('canvas');
-    canvas.width  = 32;
-    canvas.height = 32;
+    canvas.width  = FAVICON_SIZE;
+    canvas.height = FAVICON_SIZE;
     const ctx = canvas.getContext('2d')!;
 
     // Blue circle
     ctx.beginPath();
-    ctx.arc(16, 16, 15, 0, 2 * Math.PI);
-    ctx.fillStyle = '#2d7dd2';
+    ctx.arc(FAVICON_SIZE / 2, FAVICON_SIZE / 2, FAVICON_SIZE / 2 - 1, 0, 2 * Math.PI);
+    ctx.fillStyle = FAVICON_COLOR;
     ctx.fill();
 
     if (count > 0) {
@@ -48,14 +49,14 @@ function updateFavicon(count: number): void {
         ctx.font = `bold ${count > 9 ? '14' : '18'}px sans-serif`;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(count > 99 ? '99+' : String(count), 16, 17);
+        ctx.fillText(count > 99 ? '99+' : String(count), FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
     } else {
         // White Z when no drafts pending
         ctx.fillStyle = 'white';
         ctx.font = 'bold 18px sans-serif';
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Z', 16, 17);
+        ctx.fillText('Z', FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
     }
 
     const link = document.getElementById('favicon') as HTMLLinkElement;
@@ -83,7 +84,6 @@ function App() {
     const selectedChatRef    = useRef<Chat | null>(null);
     const messagesEndRef     = useRef<HTMLDivElement>(null);
 
-    const API_BASE_URL = 'http://127.0.0.1:3000';
 
     useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
 

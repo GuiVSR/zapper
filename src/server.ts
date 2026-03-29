@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_CHATS_LIMIT } from './constants'; // must be first — loads .env before anything else reads process.env
 import express from 'express';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
@@ -140,7 +141,7 @@ app.get('/api/history/:chatId', async (req, res) => {
     }
     try {
         const { chatId } = req.params;
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
         const history = await whatsappClient.getChatHistory(chatId, limit);
         const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp);
         res.json({ chatId, count: sorted.length, messages: sorted });
@@ -154,7 +155,7 @@ app.get('/api/search', async (req, res) => {
     if (!q) return res.status(400).json({ error: 'Missing query parameter "q"' });
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     try {
-        const results = await whatsappClient.searchMessages(q as string, parseInt(limit as string) || 50);
+        const results = await whatsappClient.searchMessages(q as string, parseInt(limit as string) || DEFAULT_SEARCH_LIMIT);
         res.json({ query: q, count: results.length, results });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to search messages', details: err.message });
@@ -181,7 +182,7 @@ app.get('/api/conversation/:number', async (req, res) => {
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     try {
         const { number } = req.params;
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
         let chatId = number;
         if (!chatId.includes('@') && !chatId.includes('-')) {
             chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
@@ -267,7 +268,7 @@ io.on('connection', (socket) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
+const PORT = SERVER_PORT;
 server.listen(PORT, () => {
     console.log(`\n🚀 Server running on http://localhost:${PORT}`);
     console.log(`\n📱 API endpoints:`);

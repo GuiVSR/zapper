@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { GEMINI_BASE_URL, GEMINI_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from '../constants';
 
 interface GeminiPart {
     text: string;
@@ -32,22 +33,11 @@ interface GeminiResponse {
     };
 }
 
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-
-// ─── System prompt ────────────────────────────────────────────────────────────
-// TODO: Fill in your business context, tone, and instructions here.
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
-Respond in the same language the customer wrote in.
-Keep replies concise and friendly.
-
-[ADD YOUR BUSINESS CONTEXT AND INSTRUCTIONS HERE]`;
-// ─────────────────────────────────────────────────────────────────────────────
-
 class GeminiClient {
     private apiKey: string;
     private model: string;
 
-    constructor(apiKey: string, model = 'gemini-2.0-flash') {
+    constructor(apiKey: string, model = GEMINI_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('Gemini API key is required.');
         this.apiKey = apiKey;
         this.model = model;

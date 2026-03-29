@@ -2,6 +2,7 @@ import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
 import { getGroqClient } from '../llm/groq';
 import chalk from 'chalk';
+import { POOL_WINDOW_MS, HISTORY_CONTEXT, DEFAULT_SIDEBAR_CHATS } from '../constants';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,9 +27,6 @@ export interface AIDraft {
 export type DraftCallback = (draft: AIDraft) => void;
 
 // ── Config ────────────────────────────────────────────────────────────────────
-
-const POOL_WINDOW_MS = 10_000;  // 10 seconds
-const HISTORY_CONTEXT = 10;      // last N messages to include as context
 
 export class MessageHandler {
     private client: WhatsAppClient;
@@ -253,7 +251,7 @@ export class MessageHandler {
 
             case 'chats': {
                 const chats      = await this.client.getChats();
-                const recentChats = chats.slice(0, 5)
+                const recentChats = chats.slice(0, DEFAULT_SIDEBAR_CHATS)
                     .map(c => `- ${c.name || c.id.user}: ${c.lastMessage?.body || 'No messages'}`)
                     .join('\n');
                 await this.client.sendMessage(message.from, `Recent chats:\n${recentChats}`);

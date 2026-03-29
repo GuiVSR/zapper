@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { GROQ_BASE_URL, GROQ_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt } from '../constants';
 
 export interface GroqMessage {
     role: 'system' | 'user' | 'assistant';
@@ -30,22 +31,12 @@ interface GroqResponse {
     };
 }
 
-const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
-
-// ─── System prompt ────────────────────────────────────────────────────────────
-// TODO: Fill in your business context, tone, and instructions here.
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
-Respond in the same language the customer wrote in.
-Keep replies concise and friendly.
-
-[ADD YOUR BUSINESS CONTEXT AND INSTRUCTIONS HERE]`;
-// ─────────────────────────────────────────────────────────────────────────────
 
 class GroqClient {
     private apiKey: string;
     private model: string;
 
-    constructor(apiKey: string, model = 'llama-3.3-70b-versatile') {
+    constructor(apiKey: string, model = GROQ_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('Groq API key is required.');
         this.apiKey = apiKey;
         this.model = model;
@@ -58,8 +49,8 @@ class GroqClient {
         const payload: GroqRequest = {
             model:       options?.model       ?? this.model,
             messages,
-            temperature: options?.temperature ?? 0.7,
-            max_tokens:  options?.max_tokens  ?? 500,
+            temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
+            max_tokens:  options?.max_tokens  ?? DEFAULT_MAX_TOKENS,
         };
 
         const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
@@ -113,7 +104,7 @@ class GroqClient {
      */
     async generateWhatsAppDraft(
         messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
-        systemPrompt = DEFAULT_SYSTEM_PROMPT
+        systemPrompt = getSystemPrompt()
     ): Promise<string> {
         const conversationText = messages
             .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)

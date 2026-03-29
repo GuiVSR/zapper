@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from '../constants';
 
 export interface DeepSeekMessage {
     role: 'system' | 'user' | 'assistant';
@@ -31,22 +32,11 @@ interface DeepSeekResponse {
     };
 }
 
-const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
-
-// ─── System prompt for WhatsApp customer responses ────────────────────────────
-// TODO: Fill in your business context, tone, and instructions here.
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
-Respond in the same language the customer wrote in.
-Keep replies concise and friendly.
-
-[ADD YOUR BUSINESS CONTEXT AND INSTRUCTIONS HERE]`;
-// ──────────────────────────────────────────────────────────────────────────────
-
 class DeepSeekClient {
     private apiKey: string;
     private model: string;
 
-    constructor(apiKey: string, model = 'deepseek-chat') {
+    constructor(apiKey: string, model = DEEPSEEK_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('DeepSeek API key is required.');
         this.apiKey = apiKey;
         this.model = model;
@@ -60,7 +50,7 @@ class DeepSeekClient {
         const payload: DeepSeekRequest = {
             model: options?.model ?? this.model,
             messages,
-            temperature: options?.temperature ?? 0.7,
+            temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
             max_tokens: options?.max_tokens ?? 500,
         };
 
