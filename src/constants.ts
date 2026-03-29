@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Server ────────────────────────────────────────────────────────────────────
-export const SERVER_PORT         = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+export const SERVER_PORT         = 3000;
 
 // ── Frontend ──────────────────────────────────────────────────────────────────
 export const API_BASE_URL        = 'http://127.0.0.1:3000';
@@ -39,9 +39,7 @@ export const DEFAULT_MAX_TOKENS      = 500;
 // Fallback used when SYSTEM_PROMPT is not set in .env
 export const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
 Respond in the same language the customer wrote in.
-Keep replies concise and friendly.
-
-[ADD YOUR BUSINESS CONTEXT AND INSTRUCTIONS HERE]`;
+Keep replies concise and friendly.`;
 
 /**
  * Returns the active system prompt.
