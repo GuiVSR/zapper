@@ -1,22 +1,21 @@
 import fetch from 'node-fetch';
 
-export interface DeepSeekMessage {
+export interface GroqMessage {
     role: 'system' | 'user' | 'assistant';
     content: string;
 }
 
-interface DeepSeekRequest {
+interface GroqRequest {
     model: string;
-    messages: DeepSeekMessage[];
+    messages: GroqMessage[];
     temperature?: number;
     max_tokens?: number;
-    stream?: boolean;
 }
 
-interface DeepSeekResponse {
+interface GroqResponse {
     id: string;
     choices: Array<{
-        message: DeepSeekMessage;
+        message: GroqMessage;
         finish_reason: string;
     }>;
     usage: {
@@ -31,65 +30,64 @@ interface DeepSeekResponse {
     };
 }
 
-const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 
-// ─── System prompt for WhatsApp customer responses ────────────────────────────
+// ─── System prompt ────────────────────────────────────────────────────────────
 // TODO: Fill in your business context, tone, and instructions here.
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
 Respond in the same language the customer wrote in.
 Keep replies concise and friendly.
 
 [ADD YOUR BUSINESS CONTEXT AND INSTRUCTIONS HERE]`;
-// ──────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
-class DeepSeekClient {
+class GroqClient {
     private apiKey: string;
     private model: string;
 
-    constructor(apiKey: string, model = 'deepseek-chat') {
-        if (!apiKey) throw new Error('DeepSeek API key is required.');
+    constructor(apiKey: string, model = 'llama-3.3-70b-versatile') {
+        if (!apiKey) throw new Error('Groq API key is required.');
         this.apiKey = apiKey;
         this.model = model;
     }
 
-    private async post(messages: DeepSeekMessage[], options?: {
-        temperature?: number;
-        max_tokens?: number;
-        model?: string;
-    }): Promise<string> {
-        const payload: DeepSeekRequest = {
-            model: options?.model ?? this.model,
+    private async post(
+        messages: GroqMessage[],
+        options?: { temperature?: number; max_tokens?: number; model?: string }
+    ): Promise<string> {
+        const payload: GroqRequest = {
+            model:       options?.model       ?? this.model,
             messages,
             temperature: options?.temperature ?? 0.7,
-            max_tokens: options?.max_tokens ?? 500,
+            max_tokens:  options?.max_tokens  ?? 500,
         };
 
-        const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+        const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
+                'Content-Type':  'application/json',
             },
             body: JSON.stringify(payload),
         });
 
-        const data = await response.json() as DeepSeekResponse;
+        const data = await response.json() as GroqResponse;
 
         if (!response.ok) {
             const msg = data.error?.message ?? `HTTP ${response.status}`;
-            if (response.status === 401) throw new Error(`Invalid DeepSeek API key: ${msg}`);
-            if (response.status === 429) throw new Error(`DeepSeek rate limit exceeded: ${msg}`);
-            throw new Error(`DeepSeek API error: ${msg}`);
+            if (response.status === 401) throw new Error(`Invalid Groq API key: ${msg}`);
+            if (response.status === 429) throw new Error(`Groq rate limit exceeded: ${msg}`);
+            throw new Error(`Groq API error: ${msg}`);
         }
 
         const content = data.choices?.[0]?.message?.content;
-        if (!content) throw new Error('DeepSeek returned an empty response.');
+        if (!content) throw new Error('Groq returned an empty response.');
         return content;
     }
 
     /** Send a full message history and get a reply. */
     async getResponseFromHistory(
-        chatHistory: DeepSeekMessage[],
+        chatHistory: GroqMessage[],
         options?: { temperature?: number; max_tokens?: number; model?: string }
     ): Promise<string> {
         return this.post(chatHistory, options);
@@ -111,7 +109,7 @@ class DeepSeekClient {
 
     /**
      * Generate a draft reply for a pooled WhatsApp conversation.
-     * `messages` is the list of customer messages received during the pool window.
+     * Drop-in replacement for any other LLM client's generateWhatsAppDraft.
      */
     async generateWhatsAppDraft(
         messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
@@ -130,23 +128,23 @@ class DeepSeekClient {
                 },
             ],
             {
-                max_tokens:  process.env.DEEPSEEK_MAX_TOKENS  ? parseInt(process.env.DEEPSEEK_MAX_TOKENS)  : undefined,
-                temperature: process.env.DEEPSEEK_TEMPERATURE ? parseFloat(process.env.DEEPSEEK_TEMPERATURE) : undefined,
+                max_tokens:  process.env.GROQ_MAX_TOKENS  ? parseInt(process.env.GROQ_MAX_TOKENS)    : undefined,
+                temperature: process.env.GROQ_TEMPERATURE ? parseFloat(process.env.GROQ_TEMPERATURE) : undefined,
             }
         );
     }
 }
 
-// Singleton — lazy-initialised on first use so the key can come from env at runtime.
-let _instance: DeepSeekClient | null = null;
+// ─── Singleton ────────────────────────────────────────────────────────────────
+let _instance: GroqClient | null = null;
 
-export function getDeepSeekClient(): DeepSeekClient {
+export function getGroqClient(): GroqClient {
     if (!_instance) {
-        const key = process.env.DEEPSEEK_API_KEY;
-        if (!key) throw new Error('DEEPSEEK_API_KEY is not set in your .env file.');
-        _instance = new DeepSeekClient(key, process.env.DEEPSEEK_MODEL);
+        const key = process.env.GROQ_API_KEY;
+        if (!key) throw new Error('GROQ_API_KEY is not set in your .env file.');
+        _instance = new GroqClient(key, process.env.GROQ_MODEL);
     }
     return _instance;
 }
 
-export default DeepSeekClient;
+export default GroqClient;
