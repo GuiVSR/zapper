@@ -3,6 +3,7 @@ import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
 import { WhatsAppClient } from './client';
+import cors from 'cors';
 
 const app = express();
 const server = http.createServer(app);
@@ -74,6 +75,7 @@ const whatsappClient = new WhatsAppClient({
 });
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

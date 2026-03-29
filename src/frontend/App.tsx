@@ -22,7 +22,6 @@ interface Chat {
 }
 
 function App() {
-    const [socket, setSocket] = useState<any>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [qrCode, setQrCode] = useState<string>('');
     const [status, setStatus] = useState<string>('Connecting...');
@@ -32,105 +31,119 @@ function App() {
     const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
 
-    // Reference for auto-scrolling
+    const socketRef = useRef<any>(null);
+    const selectedChatRef = useRef<Chat | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
 
-    // Backend server URL (your server is on port 3000)
-    const API_BASE_URL = 'http://localhost:3000';
+    const API_BASE_URL = 'http://127.0.0.1:3000';
 
-    // Auto-scroll to bottom function
+    // Keep selectedChat always updated inside socket callbacks
+    useEffect(() => {
+        selectedChatRef.current = selectedChat;
+    }, [selectedChat]);
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    // Scroll to bottom when messages change
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
 
+    // ✅ Initialize socket ONCE
     useEffect(() => {
-        // Connect to Socket.IO server on port 3000
-        const newSocket = io(API_BASE_URL);
-        setSocket(newSocket);
+        console.log('Initializing socket...');
 
-        // Socket event handlers
-        newSocket.on('connect', () => {
-            console.log('Connected to server');
+        const socket = io(API_BASE_URL, {
+            transports: ['websocket'],
+        });
+
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            console.log('✅ Connected:', socket.id);
             setStatus('Connected to server');
             setError('');
         });
 
-        newSocket.on('qr', (data: { qr: string }) => {
+        socket.on('disconnect', (reason: string) => {
+            console.log('❌ Disconnected:', reason);
+            setStatus(`Disconnected: ${reason}`);
+        });
+
+        socket.on('qr', (data: { qr: string }) => {
+            console.log('🔥 QR RECEIVED:', data.qr?.slice(0, 20));
             setQrCode(data.qr);
             setStatus('Scan QR code with WhatsApp');
         });
 
-        newSocket.on('ready', (data: { message: string }) => {
+        socket.on('ready', (data: { message: string }) => {
+            console.log('✅ READY:', data);
             setStatus(data.message);
             setQrCode('');
-            // Load chats when ready
             loadChats();
         });
 
-        newSocket.on('client_ready', (data: { message: string }) => {
+        socket.on('client_ready', (data: { message: string }) => {
+            console.log('✅ CLIENT READY:', data);
             setStatus(data.message);
             loadChats();
         });
 
-        newSocket.on('message', (message: Message) => {
-            console.log('New message received:', message);
-            // If this message is for the selected chat, add it to messages
-            if (selectedChat && (message.from === selectedChat.id || message.to === selectedChat.id)) {
+        socket.on('message', (message: Message) => {
+            console.log('📩 MESSAGE:', message);
+
+            const currentChat = selectedChatRef.current;
+
+            if (
+                currentChat &&
+                (message.from === currentChat.id ||
+                    message.to === currentChat.id)
+            ) {
                 setMessages(prev => [...prev, message]);
             }
         });
 
-        newSocket.on('chats_list', (chatsList: Chat[]) => {
+        socket.on('chats_list', (chatsList: Chat[]) => {
+            console.log('📚 Chats list received');
             setChats(chatsList);
         });
 
-        newSocket.on('auth_failure', (data: { message: string }) => {
+        socket.on('auth_failure', (data: { message: string }) => {
+            console.log('❌ Auth failure:', data);
             setStatus(`Auth failed: ${data.message}`);
             setError(data.message);
         });
 
-        newSocket.on('disconnected', (data: { reason: string }) => {
-            setStatus(`Disconnected: ${data.reason}`);
-            setError(`Disconnected: ${data.reason}`);
-        });
-
-        newSocket.on('error', (data: { message: string }) => {
-            console.error('Socket error:', data.message);
-            setStatus(`Error: ${data.message}`);
-            setError(data.message);
+        socket.on('error', (err: any) => {
+            console.error('🚨 SOCKET ERROR:', err);
+            setError(err?.message || 'Socket error');
         });
 
         return () => {
-            newSocket.close();
+            console.log('🧹 Cleaning socket...');
+            socket.disconnect();
         };
-    }, [selectedChat]);
+    }, []);
 
-    // Load chats from REST API - using absolute URL
     const loadChats = async () => {
         try {
-            console.log('Loading chats from API...');
+            console.log('Loading chats...');
             setStatus('Loading chats...');
-            
+
             const response = await fetch(`${API_BASE_URL}/api/chats`);
-            
+
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                throw new Error(`HTTP ${response.status}`);
             }
-            
+
             const data = await response.json();
-            console.log('Chats loaded:', data);
             setChats(data);
             setStatus('WhatsApp ready');
-            setError('');
         } catch (error: any) {
-            console.error('Error loading chats:', error);
-            setError(`Failed to load chats: ${error.message}`);
+            console.error(error);
+            setError(error.message);
             setStatus('Error loading chats');
         }
     };
@@ -138,21 +151,23 @@ function App() {
     const loadChatHistory = async (chatId: string) => {
         setLoadingHistory(true);
         setError('');
+
         try {
-            console.log(`Loading history for chat: ${chatId}`);
-            const response = await fetch(`${API_BASE_URL}/api/history/${encodeURIComponent(chatId)}?limit=50`);
-            
+            console.log('Loading history for:', chatId);
+
+            const response = await fetch(
+                `${API_BASE_URL}/api/history/${encodeURIComponent(chatId)}?limit=50`
+            );
+
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                throw new Error(`HTTP ${response.status}`);
             }
-            
+
             const data = await response.json();
-            console.log('History loaded:', data);
-            console.log(data.messages.reverse())
-            setMessages(data.messages.reverse());
+            setMessages(data.messages);
         } catch (error: any) {
-            console.error('Error loading chat history:', error);
-            setError(`Failed to load chat history: ${error.message}`);
+            console.error(error);
+            setError(error.message);
             setMessages([]);
         } finally {
             setLoadingHistory(false);
@@ -165,148 +180,128 @@ function App() {
         loadChatHistory(chat.id);
     };
 
-    // Send message - using absolute URL
     const sendMessage = async () => {
         if (!selectedChat || !messageInput.trim()) return;
 
         const message = messageInput.trim();
-        console.log(`Sending message to ${selectedChat.id}: ${message}`);
-        
+
         try {
-            const response = await fetch(`${API_BASE_URL}/api/send-message`, {
+            await fetch(`${API_BASE_URL}/api/send-message`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: selectedChat.id,
-                    message: message
-                })
+                    message,
+                }),
             });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
+            setMessages(prev => [
+                ...prev,
+                {
+                    id: Date.now().toString(),
+                    from: 'me',
+                    to: selectedChat.id,
+                    body: message,
+                    timestamp: Math.floor(Date.now() / 1000),
+                    type: 'chat',
+                    fromMe: true,
+                },
+            ]);
 
-            const result = await response.json();
-            console.log('Message sent:', result);
-            
-            const sentMessage: Message = {
-                id: Date.now().toString(),
-                from: 'me',
-                to: selectedChat.id,
-                body: message,
-                timestamp: Math.floor(Date.now() / 1000),
-                type: 'chat',
-                fromMe: true,
-                hasMedia: false
-            };
-            setMessages(prev => [...prev, sentMessage]);
             setMessageInput('');
         } catch (error: any) {
-            console.error('Error sending message:', error);
-            setError(`Failed to send message: ${error.message}`);
+            console.error(error);
+            setError(error.message);
         }
     };
 
-    const formatTimestamp = (timestamp: number) => {
-        return new Date(timestamp * 1000).toLocaleTimeString();
-    };
+    const formatTimestamp = (timestamp: number) =>
+        new Date(timestamp * 1000).toLocaleTimeString();
 
     return (
-        <div className="App">
-            <header className="App-header">
+        <div className="app">
+            {/* HEADER */}
+            <header className="header">
                 <h1>Zapper</h1>
-                <div className="status">Status: {status}</div>
-                {error && <div className="error-message">⚠️ {error}</div>}
             </header>
 
+            {/* QR */}
             {qrCode && (
-                <div className="qr-container">
-                    <h3>Scan this QR code with WhatsApp</h3>
-                    <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`} 
-                        alt="QR Code"
+                <div className="qr">
+                    <h3>Scan QR Code</h3>
+                    <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                            qrCode
+                        )}`}
                     />
-                    <p>Or scan the QR code displayed in the terminal</p>
                 </div>
             )}
 
-            <div className="container">
+            <div className="layout">
+                {/* SIDEBAR */}
                 <div className="sidebar">
-                    <h3>Chats</h3>
-                    <button onClick={loadChats} className="refresh-btn">
-                        Refresh Chats
-                    </button>
-                    <div className="chats-list">
-                        {chats.length === 0 && !qrCode && (
-                            <div className="no-chats">
-                                {status === 'Loading chats...' ? 'Loading...' : 'No chats found. Make sure WhatsApp is connected.'}
-                            </div>
-                        )}
+
+                    <div className="chat-list">
                         {chats.map(chat => (
-                            <div 
-                                key={chat.id} 
-                                className={`chat-item ${selectedChat?.id === chat.id ? 'selected' : ''}`}
+                            <div
+                                key={chat.id}
+                                className={`chat-item ${selectedChat?.id === chat.id ? 'active' : ''
+                                    }`}
                                 onClick={() => handleSelectChat(chat)}
                             >
-                                <div className="chat-name">
-                                    <strong>{chat.name || chat.id}</strong>
-                                    {chat.isGroup && <span className="group-badge">👥</span>}
+                                <div className="chat-meta">
+                                    <div className="chat-name">
+                                        {chat.name || chat.id}
+                                    </div>
+                                    <div className="chat-preview">
+                                        Click to open
+                                    </div>
                                 </div>
+
                                 {chat.unreadCount > 0 && (
-                                    <span className="unread">{chat.unreadCount}</span>
+                                    <span className="badge">{chat.unreadCount}</span>
                                 )}
                             </div>
                         ))}
                     </div>
                 </div>
 
-                <div className="main-content">
+                {/* CHAT AREA */}
+                <div className="chat-area">
                     {selectedChat ? (
                         <>
                             <div className="chat-header">
-                                <h3>{selectedChat.name || selectedChat.id}</h3>
-                                {loadingHistory && <div className="loading">Loading messages...</div>}
-                            </div>
-                            
-                            <div className="messages-section" ref={messagesContainerRef}>
-                                <div className="messages-list">
-                                    {messages.length === 0 && !loadingHistory && (
-                                        <div className="no-messages">No messages yet. Start a conversation!</div>
-                                    )}
-                                    {messages.map((msg, idx) => (
-                                        <div key={msg.id || idx} className={`message ${msg.fromMe ? 'sent' : 'received'}`}>
-                                            <div className="message-header">
-                                                <strong>{msg.fromMe ? 'You' : (msg.from || 'Unknown')}</strong>
-                                                <span className="timestamp">{formatTimestamp(msg.timestamp)}</span>
-                                            </div>
-                                            <div className="message-body">
-                                                {msg.type === 'chat' ? msg.body : `[${msg.type} message] ${msg.body || ''}`}
-                                                {msg.hasMedia && <span className="media-badge">📎</span>}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {/* Empty div for auto-scrolling reference */}
-                                    <div ref={messagesEndRef} />
-                                </div>
+                                {selectedChat.name || selectedChat.id}
                             </div>
 
-                            <div className="message-input-area">
+                            <div className="messages">
+                                {messages.map((msg, i) => (
+                                    <div
+                                        key={msg.id || i}
+                                        className={`bubble ${msg.fromMe ? 'sent' : 'received'
+                                            }`}
+                                    >
+                                        <div>{msg.body}</div>
+                                        <span className="time">
+                                            {formatTimestamp(msg.timestamp)}
+                                        </span>
+                                    </div>
+                                ))}
+                                <div ref={messagesEndRef} />
+                            </div>
+
+                            <div className="input-bar">
                                 <input
-                                    type="text"
                                     value={messageInput}
-                                    onChange={(e) => setMessageInput(e.target.value)}
-                                    placeholder="Type a message..."
-                                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                                    onChange={e => setMessageInput(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                                    placeholder="Type a message"
                                 />
                                 <button onClick={sendMessage}>Send</button>
                             </div>
                         </>
                     ) : (
-                        <div className="no-chat-selected">
-                            <p>Select a chat to start messaging</p>
-                        </div>
+                        <div className="empty">Select a chat</div>
                     )}
                 </div>
             </div>

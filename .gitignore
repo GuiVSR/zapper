@@ -2,3 +2,5 @@
 .wwebjs_cache
 node_modules
 stickers
+dist
+.env
