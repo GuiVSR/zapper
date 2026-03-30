@@ -1,5 +1,6 @@
 .wwebjs_auth
 .wwebjs_cache
+.vscode
 node_modules
 stickers
 dist
