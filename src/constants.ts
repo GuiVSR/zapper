@@ -39,7 +39,7 @@ export const GEMINI_BASE_URL     = 'https://generativelanguage.googleapis.com/v1
 export const GROQ_DEFAULT_MODEL      = 'llama-3.3-70b-versatile';
 export const DEEPSEEK_DEFAULT_MODEL  = 'deepseek-chat';
 export const KIMI_DEFAULT_MODEL      = 'moonshot-v1-8k';
-export const GEMINI_DEFAULT_MODEL    = 'gemini-2.0-flash';
+export const GEMINI_DEFAULT_MODEL    = 'gemini-2.5-flash';
 
 // ── LLM — default generation params ──────────────────────────────────────────
 export const DEFAULT_TEMPERATURE     = 0.7;
@@ -79,6 +79,11 @@ Each part should be a self-contained, natural message — do not cut mid-sentenc
 Do not include any text outside the JSON array.
 Example for maxParts=3: ["Hello! Thanks for reaching out.", "Here is the information you need: ...", "Let me know if you have any questions!"]`;
 }
+
+// ── LLM — provider selection ──────────────────────────────────────────────────
+// See src/llm/index.ts for getLLMClient() — kept server-side to avoid bundling
+// Node.js modules into the frontend Webpack build.
+export type LLMProvider = 'groq' | 'gemini' | 'deepseek';
 
 // ── Favicon ───────────────────────────────────────────────────────────────────
 export const FAVICON_SIZE        = 32;

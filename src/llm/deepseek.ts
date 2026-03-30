@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
 import { parsePartsResponse } from './groq';
 

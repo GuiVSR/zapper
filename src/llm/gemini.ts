@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { GEMINI_BASE_URL, GEMINI_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
 import { parsePartsResponse } from './groq';
 

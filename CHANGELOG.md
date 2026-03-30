@@ -2,6 +2,31 @@
 
 All notable changes to Zapper will be documented here.
 
+## [1.3.0] — 2026-03-30
+
+**Author:** GuiVSR
+
+### Provider switching & build fixes
+
+#### Added
+- **`LLM_PROVIDER` env var** — switch the active LLM provider without touching code. Valid values: `groq` (default) | `gemini` | `deepseek`
+- **`src/llm/index.ts`** — server-only provider factory (`getLLMClient()`); kept separate from `constants.ts` so Webpack never tries to bundle Node.js modules into the frontend
+- **`.vscode/settings.json`** — sets `js/ts.tsdk.path` to the workspace TypeScript so VS Code uses the project's TS version and correctly understands `ignoreDeprecations`
+
+#### Changed
+- `getLLMClient()` moved out of `constants.ts` into `src/llm/index.ts` — fixes Webpack bundling errors caused by `node-fetch` and Node.js built-ins (`node:fs`, `node:stream`, etc.) being pulled into the frontend build
+- **`node-fetch` removed** from all LLM clients (`groq.ts`, `deepseek.ts`, `gemini.ts``) and `client.ts` — replaced with the global `fetch` built into Node.js 18+, eliminating the ESM/CJS conflict entirely
+- `GEMINI_DEFAULT_MODEL` updated to `gemini-2.5-flash` (previous values `gemini-2.0-flash` and `gemini-2.5-flash-preview-04-17` are no longer available to new users)
+- `tsconfig.json` — added `"ignoreDeprecations": "6.0"` to silence the `moduleResolution=node10` deprecation warning in TypeScript 6+
+- **Mark as read on send** — `WhatsAppClient.markChatAsRead()` added; called automatically after every `POST /api/send-message` so read receipts are sent and the unread badge clears instantly
+
+#### Fixed
+- Webpack build errors: `node:fs`, `node:stream`, `node:buffer`, `worker_threads` and related modules failing to resolve — caused by `getLLMClient` being in `constants.ts` which is imported by the frontend
+- `TS1479` ESM/CJS conflict on `node-fetch` v3 imports across all LLM files
+- `TS5107` deprecation warning for `moduleResolution=node10` in TypeScript 6
+
+---
+
 ## [1.2.0] — 2026-03-30
 
 **Author:** GuiVSR
@@ -19,7 +44,7 @@ All notable changes to Zapper will be documented here.
 
 #### Changed
 - `AIDraft.draft: string` replaced by `AIDraft.parts: string[]` — always an array; single-part drafts have length 1, preserving backwards-compatible behaviour when Parts = 1
-- `generateWhatsAppDraft()` on all LLM clients (Groq, DeepSeek, Gemini, Kimi) now returns `string[]` and accepts a `maxParts` parameter
+- `generateWhatsAppDraft()` on all LLM clients (Groq, DeepSeek, Gemini) now returns `string[]` and accepts a `maxParts` parameter
 - `DEFAULT_MAX_DRAFT_PARTS` in `constants.ts` set to **3** — default for new sessions
 - `getSystemPrompt(maxParts)` now accepts a `maxParts` argument: injects a JSON-array instruction when `> 1`, and an explicit plain-text-only instruction when `= 1` to prevent the model returning accidental JSON
 - `MessageHandler.maxDraftParts` is now a public runtime property updated by both the API and the on-demand generation path, so the auto-pool (10-second silence window) always uses the same value as the UI
@@ -68,7 +93,7 @@ First working version of Zapper, a WhatsApp Web client with AI-powered reply dra
 - Draft review banner with three actions: **Send**, **Edit**, and **Discard**
 - One-click send — approve a draft and send it without touching the keyboard
 - Browser tab favicon showing a live count of pending AI drafts
-- Support for multiple LLM providers: Groq, DeepSeek, Moonshot Kimi, Google Gemini
+- Support for multiple LLM providers: Groq, DeepSeek, Google Gemini
 - Bot commands: `/ping`, `/help`, `/status`, `/chats`
 - Optional webhook forwarding for inbound messages
 - Blue UI theme

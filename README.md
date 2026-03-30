@@ -60,11 +60,6 @@ GROQ_TEMPERATURE=0.7
 # DEEPSEEK_MAX_TOKENS=250
 # DEEPSEEK_TEMPERATURE=0.7
 
-# KIMI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# KIMI_MODEL=moonshot-v1-8k
-# KIMI_MAX_TOKENS=250
-# KIMI_TEMPERATURE=0.7
-
 # GEMINI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # GEMINI_MODEL=gemini-2.0-flash
 # GEMINI_MAX_TOKENS=250
@@ -143,7 +138,6 @@ zapper/
 │   ├── llm/
 │   │   ├── groq.ts            # Groq client (active)
 │   │   ├── deepseek.ts        # DeepSeek client (alternative)
-│   │   ├── kimi.ts            # Moonshot Kimi client (alternative)
 │   │   └── gemini.ts          # Google Gemini client (alternative)
 │   └── frontend/
 │       ├── App.tsx            # Main React app
@@ -170,7 +164,6 @@ import { getGroqClient } from '../llm/groq';
 
 // To any of these:
 import { getDeepSeekClient } from '../llm/deepseek';
-import { getKimiClient }     from '../llm/kimi';
 import { getGeminiClient }   from '../llm/gemini';
 ```
 

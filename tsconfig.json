@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "commonjs",
+    "moduleResolution": "node",
     "lib": ["ES2020", "DOM"],
     "jsx": "react-jsx",
     "outDir": "./dist",
@@ -11,8 +12,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
     "allowJs": true,
+    "ignoreDeprecations": "6.0",
     "noEmit": false
   },
   "include": ["src/**/*"],

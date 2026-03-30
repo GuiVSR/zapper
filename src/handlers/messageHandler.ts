@@ -1,6 +1,6 @@
 import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
-import { getGroqClient } from '../llm/groq';
+import { getLLMClient } from '../llm';
 import chalk from 'chalk';
 import { POOL_WINDOW_MS, HISTORY_CONTEXT, DEFAULT_SIDEBAR_CHATS, getMaxDraftParts } from '../constants';
 
@@ -198,8 +198,8 @@ export class MessageHandler {
             const fullContext = [...historyContext, ...pooledMessages];
             const maxParts    = this.maxDraftParts;
 
-            const groq  = getGroqClient();
-            const parts = await groq.generateWhatsAppDraft(fullContext, maxParts);
+            const llm   = getLLMClient();
+            const parts = await llm.generateWhatsAppDraft(fullContext, maxParts);
 
             this.onDraft({
                 chatId,
@@ -228,8 +228,8 @@ export class MessageHandler {
                 const history = await this.client.getChatHistory(chatId, limit);
                 if (history.length === 0) continue;
 
-                const groq  = getGroqClient();
-                const parts = await groq.generateWhatsAppDraft(history, resolvedMaxParts);
+                const llm   = getLLMClient();
+                const parts = await llm.generateWhatsAppDraft(history, resolvedMaxParts);
 
                 this.onDraft?.({
                     chatId,

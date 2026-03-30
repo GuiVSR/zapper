@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { GROQ_BASE_URL, GROQ_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
 
 export interface GroqMessage {
@@ -145,12 +144,13 @@ class GroqClient {
  *   3. Plain text with no JSON at all → split on double newlines as a best-effort
  */
 export function parsePartsResponse(raw: string, maxParts: number): string[] {
-    if (maxParts <= 1) return [raw.trim()];
-
-    // Helper: try to extract a valid string[] from an arbitrary parsed value
+    // Helper: validate a value as string[] and cap to maxParts.
+    // When the model returns more parts than requested we keep them all —
+    // the user can merge manually in the UI.
     const toStringArray = (val: unknown): string[] | null => {
         if (Array.isArray(val) && val.length > 0 && val.every(p => typeof p === 'string')) {
-            return (val as string[]).filter(p => p.trim().length > 0).slice(0, maxParts);
+            const parts = (val as string[]).filter(p => p.trim().length > 0);
+            return parts.length > 0 ? parts : null;
         }
         return null;
     };
@@ -161,7 +161,8 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
         .replace(/\s*```$/, '')
         .trim();
 
-    // Attempt 1: direct JSON parse
+    // Attempt 1: direct JSON parse — handles the primary case where the model
+    // returns a JSON array even when maxParts=1 (model habit from prior prompts)
     try {
         const parsed = JSON.parse(cleaned);
         const arr = toStringArray(parsed);
@@ -176,7 +177,7 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
     } catch { /* fall through */ }
 
     // Attempt 3: find the first [...] block anywhere in the output
-    const bracketMatch = cleaned.match(/\[[\s\S]*\]/);
+    const bracketMatch = cleaned.match(/\[[\s\S]*?\]/);
     if (bracketMatch) {
         try {
             const arr = toStringArray(JSON.parse(bracketMatch[0]));
@@ -184,13 +185,15 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
         } catch { /* fall through */ }
     }
 
-    // Attempt 4: model returned plain prose — split on blank lines as best-effort parts
-    const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-    if (paragraphs.length > 1) {
-        return paragraphs.slice(0, maxParts);
+    // Attempt 4: if maxParts > 1 and plain prose, split on blank lines
+    if (maxParts > 1) {
+        const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+        if (paragraphs.length > 1) {
+            return paragraphs.slice(0, maxParts);
+        }
     }
 
-    // Last resort: single part
+    // Last resort: single plain-text part
     return [cleaned];
 }
 

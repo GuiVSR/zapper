@@ -3,7 +3,6 @@ import qrcode from 'qrcode-terminal';
 import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
-import fetch from 'node-fetch';
 
 export interface MessageHandler {
     (message: Message): void;
