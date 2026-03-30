@@ -17,7 +17,7 @@ export const DEFAULT_SIDEBAR_CHATS    = 5;   // chats shown in the /chats comman
 
 // ── Message pooling ───────────────────────────────────────────────────────────
 export const POOL_WINDOW_MS      = 10_000;  // wait this long after last message before drafting
-export const HISTORY_CONTEXT     = 10;      // prior messages to include as AI context
+export const HISTORY_CONTEXT     = 25;      // prior messages to include as AI context
 
 // ── LLM — API base URLs ───────────────────────────────────────────────────────
 export const GROQ_BASE_URL       = 'https://api.groq.com/openai/v1';

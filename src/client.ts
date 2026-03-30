@@ -20,7 +20,7 @@ export interface StickerInfo {
     isAnimated: boolean;
     fileSize: number;
     dimensions?: { width: number; height: number };
-    savedPath?: string; // Add this optional property
+    savedPath?: string;
 }
 
 export interface WhatsAppClientConfig {
@@ -32,11 +32,12 @@ export interface WhatsAppClientConfig {
     onAuthFailure?: (msg: string) => void;
     onDisconnected?: (reason: string) => void;
     onError?: (error: Error) => void;
-    stickersDir?: string; // Directory to save stickers
+    stickersDir?: string;
 }
 
 export interface MessageHistory {
-    id: string;
+    id: string;           // msg.id.id — short hex ID
+    serializedId: string; // msg.id._serialized — full ID needed for media lookup
     from: string;
     to: string;
     body: string;
@@ -48,163 +49,43 @@ export interface MessageHistory {
     isForwarded: boolean;
 }
 
+const AUTH_DIR       = '.wwebjs_auth';
+const REINIT_DELAY   = 3_000;  // ms to wait before reinitialising after a crash
+const MAX_REINIT     = 5;      // maximum consecutive reinit attempts before giving up
+
 export class WhatsAppClient {
-    private client: Client;
+    private client!: Client;
     private config: WhatsAppClientConfig;
     private isInitialized: boolean = false;
     private stickersDir: string;
+    private reinitAttempts: number = 0;
 
     constructor(config: WhatsAppClientConfig = {}) {
-        this.config = {
-            headless: true,
-            stickersDir: './stickers',
-            ...config
-        };
-
+        this.config = { headless: true, stickersDir: './stickers', ...config };
         this.stickersDir = this.config.stickersDir!;
 
-        // Create stickers directory if it doesn't exist
         if (!fs.existsSync(this.stickersDir)) {
             fs.mkdirSync(this.stickersDir, { recursive: true });
         }
 
+        this.buildClient();
+    }
+
+    // ── Client construction & event wiring ────────────────────────────────────
+
+    private buildClient(): void {
         this.client = new Client({
             authStrategy: new LocalAuth(),
             puppeteer: {
                 headless: this.config.headless,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            }
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            },
         });
 
         this.setupEventHandlers();
     }
 
-    public async getChatHistory(chatId: string, limit: number = 50): Promise<MessageHistory[]> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
-
-        try {
-            // Format the chat ID properly
-            let formattedId = chatId;
-            if (!formattedId.includes('@') && !formattedId.includes('-')) {
-                formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
-            }
-
-            console.log(`📜 Fetching history for ${formattedId} (limit: ${limit})`);
-
-            // Get the chat
-            const chat = await this.client.getChatById(formattedId);
-
-            // Fetch messages
-            const messages = await chat.fetchMessages({ limit });
-
-            // Format messages for response
-            const history: MessageHistory[] = messages.map(msg => ({
-                id: msg.id.id,
-                from: msg.from,
-                to: msg.to,
-                body: msg.body || '',
-                timestamp: msg.timestamp,
-                type: msg.type,
-                fromMe: msg.fromMe,
-                hasMedia: msg.hasMedia,
-                author: msg.author,
-                isForwarded: msg.isForwarded || false
-            }));
-
-            console.log(`✅ Retrieved ${history.length} messages`);
-            return history;
-        } catch (error) {
-            console.error(`❌ Failed to fetch chat history:`, error);
-            throw error;
-        }
-    }
-
-    public async getAllChatsWithMessages(limit: number = 10): Promise<Map<string, MessageHistory[]>> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
-
-        try {
-            console.log(`📜 Fetching all chats with latest messages...`);
-
-            const chats = await this.client.getChats();
-            const chatHistory = new Map<string, MessageHistory[]>();
-
-            for (const chat of chats.slice(0, limit)) {
-                const messages = await chat.fetchMessages({ limit: 20 });
-                const formattedMessages: MessageHistory[] = messages.map(msg => ({
-                    id: msg.id.id,
-                    from: msg.from,
-                    to: msg.to,
-                    body: msg.body || '',
-                    timestamp: msg.timestamp,
-                    type: msg.type,
-                    fromMe: msg.fromMe,
-                    hasMedia: msg.hasMedia,
-                    author: msg.author,
-                    isForwarded: msg.isForwarded || false
-                }));
-
-                chatHistory.set(chat.id._serialized, formattedMessages);
-            }
-
-            console.log(`✅ Retrieved history for ${chatHistory.size} chats`);
-            return chatHistory;
-        } catch (error) {
-            console.error(`❌ Failed to fetch all chats history:`, error);
-            throw error;
-        }
-    }
-
-    public async searchMessages(query: string, limit: number = 50): Promise<MessageHistory[]> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
-
-        try {
-            console.log(`🔍 Searching messages for: "${query}"`);
-
-            const chats = await this.client.getChats();
-            const matchingMessages: MessageHistory[] = [];
-
-            for (const chat of chats) {
-                const messages = await chat.fetchMessages({ limit: 100 });
-
-                const matches = messages
-                    .filter(msg => msg.body && msg.body.toLowerCase().includes(query.toLowerCase()))
-                    .map(msg => ({
-                        id: msg.id.id,
-                        from: msg.from,
-                        to: msg.to,
-                        body: msg.body || '',
-                        timestamp: msg.timestamp,
-                        type: msg.type,
-                        fromMe: msg.fromMe,
-                        hasMedia: msg.hasMedia,
-                        author: msg.author,
-                        isForwarded: msg.isForwarded || false
-                    }));
-
-                matchingMessages.push(...matches);
-
-                if (matchingMessages.length >= limit) break;
-            }
-
-            // Sort by timestamp descending
-            matchingMessages.sort((a, b) => b.timestamp - a.timestamp);
-
-            console.log(`✅ Found ${matchingMessages.length} matching messages`);
-            return matchingMessages.slice(0, limit);
-        } catch (error) {
-            console.error(`❌ Failed to search messages:`, error);
-            throw error;
-        }
-    }
-
     private setupEventHandlers(): void {
-        // Handle QR code
         this.client.on('qr', (qr: string) => {
             if (this.config.onQR) {
                 this.config.onQR(qr);
@@ -214,9 +95,9 @@ export class WhatsAppClient {
             }
         });
 
-        // Handle ready event
         this.client.on('ready', () => {
             this.isInitialized = true;
+            this.reinitAttempts = 0; // reset on successful connection
             if (this.config.onReady) {
                 this.config.onReady();
             } else {
@@ -224,39 +105,39 @@ export class WhatsAppClient {
             }
         });
 
-        // Handle messages with sticker detection
         this.client.on('message', async (message: Message) => {
-            // Check if it's a sticker message
             if (message.type === 'sticker') {
                 await this.handleSticker(message);
             }
-
-            // Pass to regular message handler if provided
             if (this.config.onMessage) {
                 this.config.onMessage(message);
             }
         });
 
-        // Handle auth failure
         this.client.on('auth_failure', (msg: string) => {
+            console.error('❌ Auth failure:', msg);
+            this.isInitialized = false;
             if (this.config.onAuthFailure) {
                 this.config.onAuthFailure(msg);
-            } else {
-                console.error('❌ Authentication failed:', msg);
             }
+            // Wipe saved session so the next init shows a fresh QR
+            this.clearAuthSession();
+            this.scheduleReinit();
         });
 
-        // Handle disconnection
         this.client.on('disconnected', (reason: string) => {
+            console.log('❌ Disconnected:', reason);
             this.isInitialized = false;
             if (this.config.onDisconnected) {
                 this.config.onDisconnected(reason);
-            } else {
-                console.log('❌ Client disconnected:', reason);
             }
+            // LOGOUT means the phone actively unlinked — wipe session + reinit
+            if (reason === 'LOGOUT') {
+                this.clearAuthSession();
+            }
+            this.scheduleReinit();
         });
 
-        // Handle errors
         this.client.on('error', (error: Error) => {
             if (this.config.onError) {
                 this.config.onError(error);
@@ -266,94 +147,55 @@ export class WhatsAppClient {
         });
     }
 
-    private async handleSticker(message: Message): Promise<void> {
+    // ── Session management ────────────────────────────────────────────────────
+
+    /**
+     * Deletes the saved Puppeteer auth session so the next initialize()
+     * starts fresh and presents a new QR code.
+     */
+    private clearAuthSession(): void {
         try {
-            // Download sticker media
-            const media = await message.downloadMedia();
-
-            if (!media) {
-                console.error('Failed to download sticker media');
-                return;
+            if (fs.existsSync(AUTH_DIR)) {
+                fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+                console.log('🗑  Cleared auth session — a new QR code will be shown on reconnect.');
             }
+        } catch (err) {
+            console.error('Failed to clear auth session:', err);
+        }
+    }
 
-            // Convert base64 to buffer
-            const buffer = Buffer.from(media.data, 'base64');
+    /**
+     * Waits REINIT_DELAY ms then destroys the old browser instance and
+     * creates a fresh Client, triggering a new QR code flow.
+     */
+    private scheduleReinit(): void {
+        if (this.reinitAttempts >= MAX_REINIT) {
+            console.error(`❌ Gave up reinitialising after ${MAX_REINIT} attempts.`);
+            return;
+        }
 
-            // Determine if it's animated (webp with multiple frames or video)
-            const isAnimated = media.mimetype === 'image/webp' && await this.isAnimatedWebp(buffer);
+        this.reinitAttempts++;
+        console.log(`🔄 Reinitialising in ${REINIT_DELAY / 1000}s (attempt ${this.reinitAttempts}/${MAX_REINIT})…`);
 
-            // Get sticker info
-            const stickerInfo: StickerInfo = {
-                message,
-                data: buffer,
-                mimeType: media.mimetype,
-                isAnimated,
-                fileSize: buffer.length
-            };
-
-            // Try to get dimensions
+        setTimeout(async () => {
             try {
-                const metadata = await sharp(buffer).metadata();
-                stickerInfo.dimensions = {
-                    width: metadata.width || 0,
-                    height: metadata.height || 0
-                };
-            } catch (error) {
-                // Dimensions not available
+                await this.client.destroy().catch(() => {/* ignore destroy errors */});
+            } catch { /* ignore */ }
+
+            this.buildClient();
+
+            try {
+                await this.client.initialize();
+            } catch (err) {
+                console.error('❌ Reinit failed:', err);
+                // If it crashed again (e.g. ProtocolError), wipe session and retry
+                this.clearAuthSession();
+                this.scheduleReinit();
             }
-
-            // Save sticker to file
-            const timestamp = Date.now();
-            const filename = `sticker_${timestamp}_${message.id.id}.webp`;
-            const filepath = path.join(this.stickersDir, filename);
-            fs.writeFileSync(filepath, buffer);
-
-            stickerInfo['savedPath'] = filepath;
-
-            // Call sticker handler if provided
-            if (this.config.onSticker) {
-                this.config.onSticker(stickerInfo);
-            } else {
-                // Default sticker display
-                this.displaySticker(stickerInfo);
-            }
-        } catch (error) {
-            console.error('Error handling sticker:', error);
-        }
+        }, REINIT_DELAY);
     }
 
-    private async isAnimatedWebp(buffer: Buffer): Promise<boolean> {
-        try {
-            // Simple check for animated webp by looking for ANIM chunk
-            const header = buffer.toString('ascii', 0, 12);
-            return header.includes('ANIM');
-        } catch (error) {
-            return false;
-        }
-    }
-
-    private displaySticker(stickerInfo: StickerInfo): void {
-        console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log(`🎨 Sticker received!`);
-        console.log(`From: ${stickerInfo.message.from}`);
-        console.log(`Type: ${stickerInfo.isAnimated ? 'Animated' : 'Static'}`);
-        console.log(`Size: ${(stickerInfo.fileSize / 1024).toFixed(2)} KB`);
-        if (stickerInfo.dimensions) {
-            console.log(`Dimensions: ${stickerInfo.dimensions.width}x${stickerInfo.dimensions.height}`);
-        }
-        if ('savedPath' in stickerInfo) {
-            console.log(`Saved to: ${stickerInfo.savedPath}`);
-        }
-
-        // ASCII art representation (simplified)
-        console.log('\n[Sticker Preview]');
-        console.log('┌─────────────────┐');
-        console.log('│                 │');
-        console.log('│   🎨 STICKER   │');
-        console.log('│                 │');
-        console.log('└─────────────────┘');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    }
+    // ── Public API ────────────────────────────────────────────────────────────
 
     public async initialize(): Promise<void> {
         if (this.isInitialized) {
@@ -362,100 +204,191 @@ export class WhatsAppClient {
         }
 
         console.log('🚀 Initializing WhatsApp client...');
-        this.client.initialize();
+
+        try {
+            await this.client.initialize();
+        } catch (err: any) {
+            console.error('❌ Initialize error:', err?.message ?? err);
+            // ProtocolError / context destroyed — wipe bad session and retry
+            this.clearAuthSession();
+            this.scheduleReinit();
+        }
+    }
+
+    public async getChatHistory(chatId: string, limit: number = 50): Promise<MessageHistory[]> {
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        let formattedId = chatId;
+        if (!formattedId.includes('@') && !formattedId.includes('-')) {
+            formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
+        }
+
+        const chat = await this.client.getChatById(formattedId);
+        const messages = await chat.fetchMessages({ limit });
+
+        return messages.map(msg => ({
+            id:           msg.id.id,
+            serializedId: msg.id._serialized,
+            from:         msg.from,
+            to:           msg.to,
+            body:         msg.body || '',
+            timestamp:    msg.timestamp,
+            type:         msg.type,
+            fromMe:       msg.fromMe,
+            hasMedia:     msg.hasMedia,
+            author:       msg.author,
+            isForwarded:  msg.isForwarded || false,
+        }));
+    }
+
+    public async getAllChatsWithMessages(limit: number = 10): Promise<Map<string, MessageHistory[]>> {
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        const chats = await this.client.getChats();
+        const chatHistory = new Map<string, MessageHistory[]>();
+
+        for (const chat of chats.slice(0, limit)) {
+            const messages = await chat.fetchMessages({ limit: 20 });
+            chatHistory.set(chat.id._serialized, messages.map(msg => ({
+                id:           msg.id.id,
+                serializedId: msg.id._serialized,
+                from:         msg.from,
+                to:           msg.to,
+                body:         msg.body || '',
+                timestamp:    msg.timestamp,
+                type:         msg.type,
+                fromMe:       msg.fromMe,
+                hasMedia:     msg.hasMedia,
+                author:       msg.author,
+                isForwarded:  msg.isForwarded || false,
+            })));
+        }
+
+        return chatHistory;
+    }
+
+    public async searchMessages(query: string, limit: number = 50): Promise<MessageHistory[]> {
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        const chats = await this.client.getChats();
+        const results: MessageHistory[] = [];
+
+        for (const chat of chats) {
+            const messages = await chat.fetchMessages({ limit: 100 });
+            const matches = messages
+                .filter(msg => msg.body?.toLowerCase().includes(query.toLowerCase()))
+                .map(msg => ({
+                    id:           msg.id.id,
+                    serializedId: msg.id._serialized,
+                    from:         msg.from,
+                    to:           msg.to,
+                    body:         msg.body || '',
+                    timestamp:    msg.timestamp,
+                    type:         msg.type,
+                    fromMe:       msg.fromMe,
+                    hasMedia:     msg.hasMedia,
+                    author:       msg.author,
+                    isForwarded:  msg.isForwarded || false,
+                }));
+            results.push(...matches);
+            if (results.length >= limit) break;
+        }
+
+        results.sort((a, b) => b.timestamp - a.timestamp);
+        return results.slice(0, limit);
     }
 
     public async sendMessage(to: string, message: string): Promise<any> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        let chatId = to;
+        if (!chatId.includes('@') && !chatId.includes('-')) {
+            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
         }
 
-        try {
-            // Format the chat ID properly
-            let chatId = to;
-
-            // If it's a phone number without @c.us, add it
-            if (!chatId.includes('@') && !chatId.includes('-')) {
-                // Remove any non-numeric characters except +
-                chatId = chatId.replace(/[^0-9+]/g, '');
-                chatId = `${chatId}@c.us`;
-            }
-
-            console.log(`📤 Sending message to ${chatId}: ${message}`);
-
-            // Get the chat
-            const chat = await this.client.getChatById(chatId);
-
-            // Send the message
-            const result = await chat.sendMessage(message);
-
-            console.log(`✅ Message sent successfully!`);
-            return result;
-        } catch (error) {
-            console.error(`❌ Failed to send message to ${to}:`, error);
-            throw error;
-        }
+        const chat = await this.client.getChatById(chatId);
+        return chat.sendMessage(message);
     }
 
     public async sendSticker(to: string, stickerPath: string): Promise<void> {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        let chatId = to;
+        if (!chatId.includes('@') && !chatId.includes('-')) {
+            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
         }
 
-        try {
-            // Format the chat ID properly
-            let chatId = to;
-            if (!chatId.includes('@') && !chatId.includes('-')) {
-                chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
-            }
-
-            const media = MessageMedia.fromFilePath(stickerPath);
-            const chat = await this.client.getChatById(chatId);
-            await chat.sendMessage(media, { sendMediaAsSticker: true });
-
-            console.log(`✅ Sticker sent successfully to ${chatId}`);
-        } catch (error) {
-            console.error(`❌ Failed to send sticker to ${to}:`, error);
-            throw error;
-        }
+        const media = MessageMedia.fromFilePath(stickerPath);
+        const chat  = await this.client.getChatById(chatId);
+        await chat.sendMessage(media, { sendMediaAsSticker: true });
     }
 
-
     public async getContactInfo(contactId: string) {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
+        if (!this.isInitialized) throw new Error('Client not initialized.');
 
         try {
             const contact = await this.client.getContactById(contactId);
             return {
-                number: contact.number,
-                name: contact.name,
+                number:   contact.number,
+                name:     contact.name,
                 pushname: contact.pushname,
-                isMe: contact.isMe,
-                isUser: contact.isUser
+                isMe:     contact.isMe,
+                isUser:   contact.isUser,
             };
-        } catch (error) {
-            console.error('Error getting contact info:', error);
+        } catch {
+            return null;
+        }
+    }
+
+
+    /**
+     * Download media for a specific message by its ID within a chat.
+     * Returns null if the message has no media or download fails.
+     */
+    /**
+     * Download media for a message identified by its serialized ID.
+     * Parses the chatId from the serialized ID, then scans fetchMessages to find it.
+     * serializedId format: "false_<number>@c.us_<hexId>" or "true_<number>@c.us_<hexId>"
+     */
+    public async getMessageMedia(serializedId: string): Promise<{ mimetype: string; data: string } | null> {
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        try {
+            // Extract chatId from serialized ID: false_5511999@c.us_3EB0... → 5511999@c.us
+            const parts = serializedId.split('_');
+            if (parts.length < 3) throw new Error(`Cannot parse serializedId: ${serializedId}`);
+            const chatId = parts[1]; // e.g. "5511999@c.us"
+            const shortId = parts.slice(2).join('_'); // the hex part
+
+            const chat = await this.client.getChatById(chatId);
+
+            // Try increasing fetch windows until we find the message
+            for (const limit of [50, 200, 500]) {
+                const messages = await chat.fetchMessages({ limit });
+                const msg = messages.find(m => m.id._serialized === serializedId || m.id.id === shortId);
+                if (msg) {
+                    if (!msg.hasMedia) return null;
+                    const media = await msg.downloadMedia();
+                    if (!media) return null;
+                    return { mimetype: media.mimetype, data: media.data };
+                }
+            }
+
+            console.warn(`[getMessageMedia] Message not found: ${serializedId}`);
+            return null;
+        } catch (err) {
+            console.error(`[getMessageMedia] Failed for ${serializedId}:`, err);
             return null;
         }
     }
 
     public async getChats() {
-        if (!this.isInitialized) {
-            throw new Error('Client not initialized. Call initialize() first.');
-        }
-
-        return await this.client.getChats();
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+        return this.client.getChats();
     }
 
-
-
     public async logout(): Promise<void> {
-        if (!this.isInitialized) {
-            return;
-        }
-
+        if (!this.isInitialized) return;
         await this.client.logout();
         this.isInitialized = false;
     }
@@ -473,6 +406,62 @@ export class WhatsAppClient {
 
     public getRawClient(): Client {
         return this.client;
+    }
+
+    // ── Sticker handling ──────────────────────────────────────────────────────
+
+    private async handleSticker(message: Message): Promise<void> {
+        try {
+            const media = await message.downloadMedia();
+            if (!media) return;
+
+            const buffer     = Buffer.from(media.data, 'base64');
+            const isAnimated = media.mimetype === 'image/webp' && this.isAnimatedWebp(buffer);
+
+            const stickerInfo: StickerInfo = {
+                message,
+                data:     buffer,
+                mimeType: media.mimetype,
+                isAnimated,
+                fileSize: buffer.length,
+            };
+
+            try {
+                const metadata = await sharp(buffer).metadata();
+                stickerInfo.dimensions = { width: metadata.width || 0, height: metadata.height || 0 };
+            } catch { /* dimensions not available */ }
+
+            const filename  = `sticker_${Date.now()}_${message.id.id}.webp`;
+            const filepath  = path.join(this.stickersDir, filename);
+            fs.writeFileSync(filepath, buffer);
+            stickerInfo.savedPath = filepath;
+
+            if (this.config.onSticker) {
+                this.config.onSticker(stickerInfo);
+            } else {
+                this.displaySticker(stickerInfo);
+            }
+        } catch (err) {
+            console.error('Error handling sticker:', err);
+        }
+    }
+
+    private isAnimatedWebp(buffer: Buffer): boolean {
+        try {
+            return buffer.toString('ascii', 0, 12).includes('ANIM');
+        } catch {
+            return false;
+        }
+    }
+
+    private displaySticker(stickerInfo: StickerInfo): void {
+        console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log(`🎨 Sticker received from: ${stickerInfo.message.from}`);
+        console.log(`Type: ${stickerInfo.isAnimated ? 'Animated' : 'Static'}`);
+        console.log(`Size: ${(stickerInfo.fileSize / 1024).toFixed(2)} KB`);
+        if (stickerInfo.dimensions) console.log(`Dimensions: ${stickerInfo.dimensions.width}x${stickerInfo.dimensions.height}`);
+        if (stickerInfo.savedPath)  console.log(`Saved to: ${stickerInfo.savedPath}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     }
 }
 

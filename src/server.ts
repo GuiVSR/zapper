@@ -144,6 +144,7 @@ app.get('/api/history/:chatId', async (req, res) => {
         const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
         const history = await whatsappClient.getChatHistory(chatId, limit);
         const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp);
+
         res.json({ chatId, count: sorted.length, messages: sorted });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chat history', details: err.message });
@@ -205,6 +206,31 @@ app.post('/api/send-message', async (req, res) => {
         res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to send message', details: err.message });
+    }
+});
+
+// Download media for a specific message
+// Uses the full serializedId (e.g. false_5511...@c.us_3EB0...) passed as a query param
+// to avoid issues with slashes in the ID breaking URL routing.
+app.get('/api/media', async (req, res) => {
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    const serializedId = req.query.id as string;
+    if (!serializedId) return res.status(400).json({ error: 'Missing "id" query parameter' });
+    try {
+        const media = await whatsappClient.getMessageMedia(decodeURIComponent(serializedId));
+        if (!media) return res.status(404).json({ error: 'No media found for this message' });
+        res.json({ messageId: serializedId, mimetype: media.mimetype, data: media.data });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch media', details: err.message });
+    }
+});
+
+app.post('/api/logout', async (_req, res) => {
+    try {
+        await whatsappClient.logout();
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to logout', details: err.message });
     }
 });
 

@@ -431,3 +431,77 @@ html, body, #root {
 
 .btn-generate-single:hover:not(:disabled) { background: #dbeafe; }
 .btn-generate-single:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── LOGOUT BUTTON ───────────────────────────────────────────────────────── */
+.btn-logout {
+  padding: 5px 12px;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: 6px;
+  background: transparent;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-logout:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+.btn-logout:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── IMAGE BUBBLES ───────────────────────────────────────────────────────── */
+.bubble-image {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+
+.media-placeholder {
+  font-size: 13px;
+  color: #888;
+  padding: 4px 0;
+}
+
+/* ── LIGHTBOX ────────────────────────────────────────────────────────────── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  object-fit: contain;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: white;
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.lightbox-close:hover { background: rgba(255,255,255,0.3); }

@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
-import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR } from '../constants';
+import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR, HISTORY_CONTEXT } from '../constants';
 
 interface Message {
     id: string;
+    serializedId?: string;
     from: string;
     to?: string;
     body: string;
@@ -27,6 +28,13 @@ interface AIDraft {
     draft: string;
     basedOnMessages: Message[];
     generatedAt: number;
+}
+
+interface MediaItem {
+    messageId: string;
+    from: string;
+    mimetype: string;
+    data: string; // base64
 }
 
 // ── Favicon ───────────────────────────────────────────────────────────────────
@@ -64,7 +72,10 @@ function App() {
     const [messageInput, setMessageInput]   = useState<string>('');
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [error, setError]                 = useState<string>('');
+    const [loggingOut, setLoggingOut]         = useState(false);
     const [drafts, setDrafts]               = useState<Record<string, AIDraft>>({});
+    const [media, setMedia]                 = useState<Record<string, MediaItem>>({});
+    const [lightbox, setLightbox]           = useState<MediaItem | null>(null);
 
     // Multi-select
     const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -75,7 +86,7 @@ function App() {
     const [generatingDraft, setGeneratingDraft] = useState(false);
 
     // Shared message limit
-    const [messageLimit, setMessageLimit] = useState(10);
+    const [messageLimit, setMessageLimit] = useState(HISTORY_CONTEXT);
 
     const socketRef       = useRef<any>(null);
     const selectedChatRef = useRef<Chat | null>(null);
@@ -118,6 +129,10 @@ function App() {
             setMultiGenerating(false);
         });
 
+        socket.on('media', (item: MediaItem) => {
+            setMedia(prev => ({ ...prev, [item.messageId]: item }));
+        });
+
         return () => { socket.disconnect(); };
     }, []);
 
@@ -133,12 +148,34 @@ function App() {
         } catch (err: any) { setError(err.message); setStatus('Error loading chats'); }
     };
 
+    const fetchMediaForMessages = (msgs: Message[]) => {
+        // Fire lazy media fetches for all image messages that have a serializedId
+        msgs
+            .filter(m => m.hasMedia && m.type === 'image' && m.serializedId)
+            .forEach(async msg => {
+                try {
+                    const res = await fetch(
+                        `${API_BASE_URL}/api/media?id=${encodeURIComponent(msg.serializedId!)}`
+                    );
+                    if (!res.ok) return;
+                    const item = await res.json();
+                    setMedia(prev => ({
+                        ...prev,
+                        [msg.id]: { messageId: msg.id, from: msg.from, mimetype: item.mimetype, data: item.data },
+                    }));
+                } catch { /* non-critical */ }
+            });
+    };
+
     const loadChatHistory = async (chatId: string) => {
         setLoadingHistory(true); setError('');
         try {
             const res = await fetch(`${API_BASE_URL}/api/history/${encodeURIComponent(chatId)}?limit=50`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setMessages((await res.json()).messages);
+            const data = await res.json();
+            const msgs: Message[] = data.messages;
+            setMessages(msgs);
+            fetchMediaForMessages(msgs);
         } catch (err: any) { setError(err.message); setMessages([]); }
         finally { setLoadingHistory(false); }
     };
@@ -237,6 +274,24 @@ function App() {
         setSelectedChatIds(new Set());
     };
 
+    const handleLogout = async () => {
+        if (loggingOut) return;
+        setLoggingOut(true);
+        try {
+            await fetch(`${API_BASE_URL}/api/logout`, { method: 'POST' });
+            // Clear local state — QR code will appear via socket once client reinits
+            setChats([]);
+            setMessages([]);
+            setSelectedChat(null);
+            setDrafts({});
+            setStatus('Logging out…');
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoggingOut(false);
+        }
+    };
+
     const formatTimestamp = (ts: number) =>
         new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -247,6 +302,14 @@ function App() {
             <header className="header">
                 <h1>Zapper</h1>
                 <span className="status-pill">{status}</span>
+                <button
+                    className="btn-logout"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    title="Logout from WhatsApp"
+                >
+                    {loggingOut ? '⏳' : '⏏ Logout'}
+                </button>
             </header>
 
             {qrCode && (
@@ -345,7 +408,25 @@ function App() {
                             <div className="messages">
                                 {messages.map((msg, i) => (
                                     <div key={msg.id || i} className={`bubble ${msg.fromMe ? 'sent' : 'received'}`}>
-                                        <div>{msg.body}</div>
+                                        {media[msg.id] && media[msg.id].mimetype.startsWith('image/') && (
+                                            <img
+                                                className="bubble-image"
+                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
+                                                alt="received image"
+                                                onClick={() => setLightbox(media[msg.id])}
+                                            />
+                                        )}
+                                        {msg.body && <div>{msg.body}</div>}
+                                        {msg.hasMedia && !media[msg.id] && (
+                                            <div className="media-placeholder">
+                                                {msg.type === 'image'    ? '🖼️ Loading image…'  :
+                                                 msg.type === 'video'    ? '🎥 Video'            :
+                                                 msg.type === 'audio'    ? '🎵 Audio'            :
+                                                 msg.type === 'document' ? '📄 Document'         :
+                                                 msg.type === 'sticker'  ? '🎨 Sticker'          :
+                                                                           '📎 Media'}
+                                            </div>
+                                        )}
                                         <span className="time">{formatTimestamp(msg.timestamp)}</span>
                                     </div>
                                 ))}
@@ -394,6 +475,17 @@ function App() {
                     )}
                 </div>
             </div>
+            {/* Lightbox */}
+            {lightbox && (
+                <div className="lightbox" onClick={() => setLightbox(null)}>
+                    <img
+                        src={`data:${lightbox.mimetype};base64,${lightbox.data}`}
+                        alt="full size"
+                        onClick={e => e.stopPropagation()}
+                    />
+                    <button className="lightbox-close" onClick={() => setLightbox(null)}>✕</button>
+                </div>
+            )}
         </div>
     );
 }
