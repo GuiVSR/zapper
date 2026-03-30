@@ -2,7 +2,7 @@ import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
 import { getGroqClient } from '../llm/groq';
 import chalk from 'chalk';
-import { POOL_WINDOW_MS, HISTORY_CONTEXT, DEFAULT_SIDEBAR_CHATS } from '../constants';
+import { POOL_WINDOW_MS, HISTORY_CONTEXT, DEFAULT_SIDEBAR_CHATS, getMaxDraftParts } from '../constants';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,8 @@ export interface PooledMessage {
 
 export interface AIDraft {
     chatId: string;
-    draft: string;
+    /** One element per message part. Single-part drafts have length 1. */
+    parts: string[];
     basedOnMessages: PooledMessage[];
     generatedAt: number;
 }
@@ -32,6 +33,9 @@ export class MessageHandler {
     private client: WhatsAppClient;
     private webhookUrl?: string;
     private onDraft?: DraftCallback;
+
+    // Runtime-settable — updated by the API whenever the frontend changes the value
+    public maxDraftParts: number = getMaxDraftParts();
 
     // Pooling state — one entry per chatId
     private pools  = new Map<string, PooledMessage[]>();
@@ -132,7 +136,6 @@ export class MessageHandler {
     // ── Pooling ───────────────────────────────────────────────────────────────
 
     private poolMessage(message: Message): void {
-        // Only pool inbound plain-text messages
         if (message.fromMe)              return;
         if (message.type !== 'chat')     return;
         if (!message.body?.trim())       return;
@@ -154,7 +157,6 @@ export class MessageHandler {
             hasMedia:  message.hasMedia,
         });
 
-        // Reset the debounce timer for this chat
         if (this.timers.has(chatId)) {
             clearTimeout(this.timers.get(chatId)!);
         }
@@ -182,11 +184,9 @@ export class MessageHandler {
         );
 
         try {
-            // Fetch the last N messages from history for context
             let historyContext: PooledMessage[] = [];
             try {
                 const history = await this.client.getChatHistory(chatId, HISTORY_CONTEXT + pooledMessages.length);
-                // Filter out the pooled messages (already have them) and keep only prior ones
                 const pooledIds = new Set(pooledMessages.map(m => m.id));
                 historyContext = history
                     .filter(m => !pooledIds.has(m.id))
@@ -195,47 +195,50 @@ export class MessageHandler {
                 console.warn(chalk.yellow(`[Pooler] Could not fetch history for ${chatId}, proceeding without context`));
             }
 
-            // Build full context: prior history + new pooled messages
             const fullContext = [...historyContext, ...pooledMessages];
+            const maxParts    = this.maxDraftParts;
 
             const groq  = getGroqClient();
-            const draft = await groq.generateWhatsAppDraft(fullContext);
+            const parts = await groq.generateWhatsAppDraft(fullContext, maxParts);
 
             this.onDraft({
                 chatId,
-                draft,
+                parts,
                 basedOnMessages: pooledMessages,
                 generatedAt: Math.floor(Date.now() / 1000),
             });
 
-            console.log(chalk.blue(`[Pooler] Draft generated for ${chatId} (context: ${historyContext.length} prior + ${pooledMessages.length} new)`));
+            console.log(chalk.blue(`[Pooler] Draft generated for ${chatId} — ${parts.length} part(s) (context: ${historyContext.length} prior + ${pooledMessages.length} new)`));
         } catch (err) {
             console.error(chalk.red(`[Pooler] Failed to generate draft for ${chatId}:`), err);
         }
     }
 
-
     /**
      * On-demand draft generation — called by the API endpoint.
-     * Fetches the last `limit` messages for each chatId and fires onDraft for each.
+     * maxParts is passed explicitly so the frontend value is always respected.
      */
-    public async generateDraftsForChats(chatIds: string[], limit: number): Promise<void> {
+    public async generateDraftsForChats(chatIds: string[], limit: number, maxParts?: number): Promise<void> {
+        const resolvedMaxParts = maxParts ?? this.maxDraftParts;
+        // Keep the stored value in sync so the auto-pool uses the same setting
+        this.maxDraftParts = resolvedMaxParts;
+
         for (const chatId of chatIds) {
             try {
                 const history = await this.client.getChatHistory(chatId, limit);
                 if (history.length === 0) continue;
 
                 const groq  = getGroqClient();
-                const draft = await groq.generateWhatsAppDraft(history);
+                const parts = await groq.generateWhatsAppDraft(history, resolvedMaxParts);
 
                 this.onDraft?.({
                     chatId,
-                    draft,
+                    parts,
                     basedOnMessages: history,
                     generatedAt: Math.floor(Date.now() / 1000),
                 });
 
-                console.log(chalk.blue(`[OnDemand] Draft generated for ${chatId} (${history.length} messages)`));
+                console.log(chalk.blue(`[OnDemand] Draft generated for ${chatId} — ${parts.length} part(s), maxParts=${resolvedMaxParts} (${history.length} messages)`));
             } catch (err) {
                 console.error(chalk.red(`[OnDemand] Failed for ${chatId}:`), err);
             }
@@ -252,7 +255,7 @@ export class MessageHandler {
     // ── Commands ──────────────────────────────────────────────────────────────
 
     private async handleCommand(message: Message): Promise<void> {
-        const [command, ...args] = message.body.slice(1).split(' ');
+        const [command] = message.body.slice(1).split(' ');
 
         switch (command.toLowerCase()) {
             case 'ping':

@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
-import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from '../constants';
+import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
+import { parsePartsResponse } from './groq';
 
 export interface DeepSeekMessage {
     role: 'system' | 'user' | 'assistant';
@@ -77,7 +78,6 @@ class DeepSeekClient {
         return content;
     }
 
-    /** Send a full message history and get a reply. */
     async getResponseFromHistory(
         chatHistory: DeepSeekMessage[],
         options?: { temperature?: number; max_tokens?: number; model?: string }
@@ -85,7 +85,6 @@ class DeepSeekClient {
         return this.post(chatHistory, options);
     }
 
-    /** Convenience: system prompt + flat message list. */
     async getResponseWithSystem(
         systemPrompt: string,
         userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -94,24 +93,20 @@ class DeepSeekClient {
         return this.post([{ role: 'system', content: systemPrompt }, ...userMessages], options);
     }
 
-    /** One-shot question. */
     async ask(question: string): Promise<string> {
         return this.post([{ role: 'user', content: question }]);
     }
 
-    /**
-     * Generate a draft reply for a pooled WhatsApp conversation.
-     * `messages` is the list of customer messages received during the pool window.
-     */
     async generateWhatsAppDraft(
         messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
-        systemPrompt = DEFAULT_SYSTEM_PROMPT
-    ): Promise<string> {
+        maxParts: number = getMaxDraftParts()
+    ): Promise<string[]> {
+        const systemPrompt = getSystemPrompt(maxParts);
         const conversationText = messages
             .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)
             .join('\n');
 
-        return this.post(
+        const raw = await this.post(
             [
                 { role: 'system', content: systemPrompt },
                 {
@@ -124,10 +119,11 @@ class DeepSeekClient {
                 temperature: process.env.DEEPSEEK_TEMPERATURE ? parseFloat(process.env.DEEPSEEK_TEMPERATURE) : undefined,
             }
         );
+
+        return parsePartsResponse(raw, maxParts);
     }
 }
 
-// Singleton — lazy-initialised on first use so the key can come from env at runtime.
 let _instance: DeepSeekClient | null = null;
 
 export function getDeepSeekClient(): DeepSeekClient {

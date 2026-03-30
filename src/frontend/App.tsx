@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 import './App.css';
-import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR, HISTORY_CONTEXT } from '../constants';
+import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR, HISTORY_CONTEXT, DEFAULT_MAX_DRAFT_PARTS } from '../constants';
 
 interface Message {
     id: string;
@@ -25,7 +25,8 @@ interface Chat {
 
 interface AIDraft {
     chatId: string;
-    draft: string;
+    /** One element per message part — length 1 when no splitting. */
+    parts: string[];
     basedOnMessages: Message[];
     generatedAt: number;
 }
@@ -88,6 +89,9 @@ function App() {
     // Shared message limit
     const [messageLimit, setMessageLimit] = useState(HISTORY_CONTEXT);
 
+    // Max draft parts — controls how many parts the AI should split into
+    const [maxDraftParts, setMaxDraftParts] = useState(DEFAULT_MAX_DRAFT_PARTS);
+
     const socketRef       = useRef<any>(null);
     const selectedChatRef = useRef<Chat | null>(null);
     const messagesEndRef  = useRef<HTMLDivElement>(null);
@@ -95,6 +99,15 @@ function App() {
     useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
     useEffect(() => { updateFavicon(Object.keys(drafts).length); }, [drafts]);
+
+    // Sync maxDraftParts to the server whenever it changes so the auto-pool uses the same value
+    useEffect(() => {
+        fetch(`${API_BASE_URL}/api/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ maxDraftParts }),
+        }).catch(() => {/* non-critical */});
+    }, [maxDraftParts]);
 
     useEffect(() => {
         const socket = io(API_BASE_URL, { transports: ['websocket'] });
@@ -149,7 +162,6 @@ function App() {
     };
 
     const fetchMediaForMessages = (msgs: Message[]) => {
-        // Fire lazy media fetches for all image messages that have a serializedId
         msgs
             .filter(m => m.hasMedia && m.type === 'image' && m.serializedId)
             .forEach(async msg => {
@@ -217,32 +229,81 @@ function App() {
                 id: Date.now().toString(), from: 'me', to: selectedChat.id,
                 body, timestamp: Math.floor(Date.now() / 1000), type: 'chat', fromMe: true,
             }]);
+            // Mirror the server-side sendSeen — clear the unread badge immediately
+            setChats(prev => prev.map(c => c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c));
             setMessageInput('');
         } catch (err: any) { setError(err.message); }
     };
 
     // ── Draft actions ─────────────────────────────────────────────────────────
 
-    const editDraft = () => {
-        if (!selectedChat) return;
-        const d = drafts[selectedChat.id];
-        if (!d) return;
-        setMessageInput(d.draft);
-        discardDraft();
-    };
-
-    const sendDraft = async () => {
-        if (!selectedChat) return;
-        const d = drafts[selectedChat.id];
-        if (!d) return;
-        discardDraft();
-        await sendMessage(d.draft);
-    };
-
     const discardDraft = (chatId?: string) => {
         const id = chatId ?? selectedChat?.id;
         if (!id) return;
         setDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
+    };
+
+    /** Remove a single part from the draft. */
+    const removePart = (chatId: string, idx: number) => {
+        setDrafts(prev => {
+            const d = prev[chatId];
+            if (!d) return prev;
+            const parts = d.parts.filter((_, i) => i !== idx);
+            if (parts.length === 0) {
+                const next = { ...prev };
+                delete next[chatId];
+                return next;
+            }
+            return { ...prev, [chatId]: { ...d, parts } };
+        });
+    };
+
+    /** Edit a single part inline. */
+    const updatePart = (chatId: string, idx: number, value: string) => {
+        setDrafts(prev => {
+            const d = prev[chatId];
+            if (!d) return prev;
+            const parts = d.parts.map((p, i) => i === idx ? value : p);
+            return { ...prev, [chatId]: { ...d, parts } };
+        });
+    };
+
+    /** Merge all parts into one, joined by a space. */
+    const mergeParts = (chatId: string) => {
+        setDrafts(prev => {
+            const d = prev[chatId];
+            if (!d) return prev;
+            return { ...prev, [chatId]: { ...d, parts: [d.parts.join(' ')] } };
+        });
+    };
+
+    /** Load the merged text into the input box for manual editing. */
+    const editDraft = () => {
+        if (!selectedChat) return;
+        const d = drafts[selectedChat.id];
+        if (!d) return;
+        setMessageInput(d.parts.join(' '));
+        discardDraft();
+    };
+
+    /** Send all parts as separate WhatsApp messages in sequence. */
+    const sendAllParts = async () => {
+        if (!selectedChat) return;
+        const d = drafts[selectedChat.id];
+        if (!d) return;
+        discardDraft();
+        for (const part of d.parts) {
+            await sendMessage(part);
+        }
+    };
+
+    /** Send only one specific part. */
+    const sendPart = async (chatId: string, idx: number) => {
+        const d = drafts[chatId];
+        if (!d || !selectedChat) return;
+        const part = d.parts[idx];
+        removePart(chatId, idx);
+        await sendMessage(part);
     };
 
     // ── On-demand generation ──────────────────────────────────────────────────
@@ -254,7 +315,7 @@ function App() {
             await fetch(`${API_BASE_URL}/api/generate-drafts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatIds: [selectedChat.id], limit: messageLimit }),
+                body: JSON.stringify({ chatIds: [selectedChat.id], limit: messageLimit, maxDraftParts }),
             });
         } catch (err: any) { setError(err.message); setGeneratingDraft(false); }
     };
@@ -266,7 +327,7 @@ function App() {
             await fetch(`${API_BASE_URL}/api/generate-drafts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatIds: Array.from(selectedChatIds), limit: messageLimit }),
+                body: JSON.stringify({ chatIds: Array.from(selectedChatIds), limit: messageLimit, maxDraftParts }),
             });
             setTimeout(() => setMultiGenerating(false), 30_000);
         } catch (err: any) { setError(err.message); setMultiGenerating(false); }
@@ -279,7 +340,6 @@ function App() {
         setLoggingOut(true);
         try {
             await fetch(`${API_BASE_URL}/api/logout`, { method: 'POST' });
-            // Clear local state — QR code will appear via socket once client reinits
             setChats([]);
             setMessages([]);
             setSelectedChat(null);
@@ -296,6 +356,7 @@ function App() {
         new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const currentDraft = selectedChat ? drafts[selectedChat.id] : null;
+    const isMultiPart  = (currentDraft?.parts.length ?? 0) > 1;
 
     return (
         <div className="app">
@@ -328,7 +389,7 @@ function App() {
                     {/* Toolbar */}
                     <div className="sidebar-toolbar">
                         <div className="limit-control">
-                            <label htmlFor="msg-limit">Messages</label>
+                            <label htmlFor="msg-limit">Msgs</label>
                             <input
                                 id="msg-limit"
                                 type="number"
@@ -336,6 +397,19 @@ function App() {
                                 max={100}
                                 value={messageLimit}
                                 onChange={e => setMessageLimit(Math.max(1, parseInt(e.target.value) || 1))}
+                                title="Number of recent messages sent to the AI as context"
+                            />
+                        </div>
+                        <div className="limit-control">
+                            <label htmlFor="parts-limit">Parts</label>
+                            <input
+                                id="parts-limit"
+                                type="number"
+                                min={1}
+                                max={10}
+                                value={maxDraftParts}
+                                onChange={e => setMaxDraftParts(Math.max(1, parseInt(e.target.value) || 1))}
+                                title="Max number of message parts the AI should split its reply into"
                             />
                         </div>
                         <button
@@ -384,7 +458,9 @@ function App() {
                                 <div className="chat-meta">
                                     <div className="chat-name">{chat.name || chat.id}</div>
                                     <div className="chat-preview">
-                                        {drafts[chat.id] ? '🤖 Draft ready' : 'Click to open'}
+                                        {drafts[chat.id]
+                                            ? `🤖 ${drafts[chat.id].parts.length} part draft ready`
+                                            : 'Click to open'}
                                     </div>
                                 </div>
                                 <div className="chat-badges">
@@ -433,17 +509,67 @@ function App() {
                                 <div ref={messagesEndRef} />
                             </div>
 
+                            {/* ── AI DRAFT BANNER ── */}
                             {currentDraft && (
                                 <div className="draft-banner">
                                     <div className="draft-header">
-                                        <span className="draft-label">🤖 AI Draft</span>
-                                        <span className="draft-time">{formatTimestamp(currentDraft.generatedAt)}</span>
+                                        <span className="draft-label">
+                                            🤖 AI Draft
+                                            {isMultiPart && (
+                                                <span className="draft-parts-badge">
+                                                    {currentDraft.parts.length} parts
+                                                </span>
+                                            )}
+                                        </span>
+                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                            <span className="draft-time">{formatTimestamp(currentDraft.generatedAt)}</span>
+                                            <button className="btn-discard" onClick={() => discardDraft()}>✕ Discard all</button>
+                                        </div>
                                     </div>
-                                    <div className="draft-body">{currentDraft.draft}</div>
+
+                                    {/* Individual parts */}
+                                    <div className="draft-parts">
+                                        {currentDraft.parts.map((part, idx) => (
+                                            <div key={idx} className="draft-part">
+                                                <div className="draft-part-header">
+                                                    {isMultiPart && (
+                                                        <span className="draft-part-num">Part {idx + 1}</span>
+                                                    )}
+                                                    <button
+                                                        className="btn-part-remove"
+                                                        onClick={() => removePart(currentDraft.chatId, idx)}
+                                                        title="Remove this part"
+                                                    >✕</button>
+                                                </div>
+                                                <textarea
+                                                    className="draft-body draft-body-editable"
+                                                    value={part}
+                                                    onChange={e => updatePart(currentDraft.chatId, idx, e.target.value)}
+                                                    rows={Math.max(2, part.split('\n').length)}
+                                                />
+                                                <div className="draft-part-actions">
+                                                    <button
+                                                        className="btn-send btn-send-part"
+                                                        onClick={() => sendPart(currentDraft.chatId, idx)}
+                                                    >
+                                                        ✅ Send this
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Global actions */}
                                     <div className="draft-actions">
-                                        <button className="btn-send"    onClick={sendDraft}>✅ Send</button>
-                                        <button className="btn-edit"    onClick={editDraft}>✏️ Edit</button>
-                                        <button className="btn-discard" onClick={() => discardDraft()}>✕ Discard</button>
+                                        <button className="btn-send" onClick={sendAllParts}>
+                                            {isMultiPart ? `✅ Send all ${currentDraft.parts.length}` : '✅ Send'}
+                                        </button>
+                                        {isMultiPart && (
+                                            <button className="btn-edit" onClick={() => mergeParts(currentDraft.chatId)}>
+                                                ⊕ Merge
+                                            </button>
+                                        )}
+                                        <button className="btn-edit" onClick={editDraft}>✏️ Edit in input</button>
                                     </div>
                                 </div>
                             )}
@@ -459,7 +585,7 @@ function App() {
                                     className="btn-generate-single"
                                     onClick={generateDraftForCurrentChat}
                                     disabled={generatingDraft}
-                                    title={`Generate AI draft from last ${messageLimit} messages`}
+                                    title={`Generate AI draft (${maxDraftParts} part${maxDraftParts > 1 ? 's' : ''})`}
                                 >
                                     {generatingDraft ? '⏳' : '🤖'}
                                 </button>

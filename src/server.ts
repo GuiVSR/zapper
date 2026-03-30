@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_CHATS_LIMIT } from './constants'; // must be first — loads .env before anything else reads process.env
+import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_CHATS_LIMIT } from './constants';
 import express from 'express';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
@@ -29,7 +29,6 @@ const whatsappClient = new WhatsAppClient({
         io.emit('ready', { message: 'WhatsApp is connected and ready!' });
     },
     onMessage: async (message) => {
-        // Emit raw message to frontend
         io.emit('message', {
             id:       message.id.id,
             from:     message.from,
@@ -41,7 +40,6 @@ const whatsappClient = new WhatsAppClient({
             hasMedia: message.hasMedia,
         });
 
-        // Delegate all handling (logging, pooling, commands, webhook) to MessageHandler
         await messageHandler.handleMessage(message);
 
         if (message.hasMedia) {
@@ -83,12 +81,12 @@ const whatsappClient = new WhatsAppClient({
     },
 });
 
-// ── Message handler (owns pooling + AI draft generation) ──────────────────────
+// ── Message handler ───────────────────────────────────────────────────────────
 const messageHandler = new MessageHandler(
     whatsappClient,
-    process.env.WEBHOOK_URL,          // optional — set in .env if needed
+    process.env.WEBHOOK_URL,
     (draft) => {
-        console.log(`[Server] Emitting ai_draft for chat ${draft.chatId}`);
+        console.log(`[Server] Emitting ai_draft for chat ${draft.chatId} (${draft.parts.length} part(s))`);
         io.emit('ai_draft', draft);
     }
 );
@@ -144,7 +142,6 @@ app.get('/api/history/:chatId', async (req, res) => {
         const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
         const history = await whatsappClient.getChatHistory(chatId, limit);
         const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp);
-
         res.json({ chatId, count: sorted.length, messages: sorted });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chat history', details: err.message });
@@ -203,15 +200,14 @@ app.post('/api/send-message', async (req, res) => {
     if (!to || !message) return res.status(400).json({ error: 'Missing "to" or "message" field' });
     try {
         const result = await whatsappClient.sendMessage(to, message);
+        // Mark all messages in the chat as read
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
         res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to send message', details: err.message });
     }
 });
 
-// Download media for a specific message
-// Uses the full serializedId (e.g. false_5511...@c.us_3EB0...) passed as a query param
-// to avoid issues with slashes in the ID breaking URL routing.
 app.get('/api/media', async (req, res) => {
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     const serializedId = req.query.id as string;
@@ -234,21 +230,30 @@ app.post('/api/logout', async (_req, res) => {
     }
 });
 
+// Update runtime settings (e.g. maxDraftParts) without triggering a generation
+app.post('/api/settings', (req, res) => {
+    const { maxDraftParts } = req.body;
+    if (typeof maxDraftParts === 'number' && maxDraftParts >= 1) {
+        messageHandler.maxDraftParts = Math.floor(maxDraftParts);
+        console.log(`[Settings] maxDraftParts updated to ${messageHandler.maxDraftParts}`);
+    }
+    res.json({ maxDraftParts: messageHandler.maxDraftParts });
+});
+
 // Generate AI draft on demand for one or more chats
-// Body: { chatIds: string[], limit: number }
+// Body: { chatIds: string[], limit?: number, maxDraftParts?: number }
 app.post('/api/generate-drafts', async (req, res) => {
-    const { chatIds, limit } = req.body;
+    const { chatIds, limit, maxDraftParts } = req.body;
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     if (!Array.isArray(chatIds) || chatIds.length === 0) return res.status(400).json({ error: 'Missing or empty "chatIds" array' });
 
-    const messageLimit = typeof limit === 'number' && limit > 0 ? limit : 10;
+    const messageLimit  = typeof limit         === 'number' && limit         > 0  ? limit         : 10;
+    const partsLimit    = typeof maxDraftParts  === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
 
-    // Fire off one draft per chat — results are emitted as ai_draft socket events
-    // so the frontend receives them the same way as pooled drafts.
-    messageHandler.generateDraftsForChats(chatIds, messageLimit)
+    messageHandler.generateDraftsForChats(chatIds, messageLimit, partsLimit)
         .catch(err => console.error('[Server] generate-drafts error:', err));
 
-    res.json({ accepted: chatIds.length, limit: messageLimit });
+    res.json({ accepted: chatIds.length, limit: messageLimit, maxDraftParts: partsLimit });
 });
 
 // ── Static file serving ───────────────────────────────────────────────────────
@@ -323,10 +328,10 @@ server.listen(PORT, () => {
     console.log(`   GET  /api/chats-with-messages`);
     console.log(`   GET  /api/conversation/:number`);
     console.log(`   POST /api/send-message`);
+    console.log(`   POST /api/generate-drafts`);
     console.log(`\n🤖 Socket events emitted:`);
-    console.log(`   ai_draft  — DeepSeek draft ready for review`);
+    console.log(`   ai_draft  — AI draft ready for review`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => { messageHandler.destroy(); process.exit(0); });
 process.on('SIGINT',  () => { messageHandler.destroy(); process.exit(0); });

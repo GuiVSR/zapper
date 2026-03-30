@@ -19,6 +19,16 @@ export const DEFAULT_SIDEBAR_CHATS    = 5;   // chats shown in the /chats comman
 export const POOL_WINDOW_MS      = 10_000;  // wait this long after last message before drafting
 export const HISTORY_CONTEXT     = 25;      // prior messages to include as AI context
 
+// ── AI draft splitting ────────────────────────────────────────────────────────
+// How many parts the AI should split its reply into (1 = no split).
+// Can be overridden at runtime via the MAX_DRAFT_PARTS env var.
+export const DEFAULT_MAX_DRAFT_PARTS = 3;
+
+export function getMaxDraftParts(): number {
+    const val = parseInt(process.env.MAX_DRAFT_PARTS ?? '');
+    return Number.isFinite(val) && val >= 1 ? val : DEFAULT_MAX_DRAFT_PARTS;
+}
+
 // ── LLM — API base URLs ───────────────────────────────────────────────────────
 export const GROQ_BASE_URL       = 'https://api.groq.com/openai/v1';
 export const DEEPSEEK_BASE_URL   = 'https://api.deepseek.com';
@@ -42,12 +52,32 @@ Respond in the same language the customer wrote in.
 Keep replies concise and friendly.`;
 
 /**
- * Returns the active system prompt.
- * Priority: SYSTEM_PROMPT env var → DEFAULT_SYSTEM_PROMPT constant.
- * Set SYSTEM_PROMPT in your .env to override without touching code.
+ * Returns the active system prompt, optionally injecting a splitting instruction.
+ *
+ * When maxParts > 1 the prompt tells the model to return a JSON array of strings
+ * (one element per message part). When maxParts === 1 the model returns plain text
+ * as before — no behaviour change for existing users who don't touch the setting.
+ *
+ * Priority for base prompt: SYSTEM_PROMPT env var → DEFAULT_SYSTEM_PROMPT constant.
  */
-export function getSystemPrompt(): string {
-    return process.env.SYSTEM_PROMPT?.trim() || DEFAULT_SYSTEM_PROMPT;
+export function getSystemPrompt(maxParts: number = 1): string {
+    const base = process.env.SYSTEM_PROMPT?.trim() || DEFAULT_SYSTEM_PROMPT;
+
+    if (maxParts <= 1) {
+        return `${base}
+
+IMPORTANT — Reply format:
+Return your reply as plain text only. Do NOT use JSON, arrays, or any special formatting.`;
+    }
+
+    return `${base}
+
+IMPORTANT — Reply format:
+You must split your reply into at most ${maxParts} separate WhatsApp messages.
+Return your answer as a JSON array of strings, one string per message part.
+Each part should be a self-contained, natural message — do not cut mid-sentence.
+Do not include any text outside the JSON array.
+Example for maxParts=3: ["Hello! Thanks for reaching out.", "Here is the information you need: ...", "Let me know if you have any questions!"]`;
 }
 
 // ── Favicon ───────────────────────────────────────────────────────────────────

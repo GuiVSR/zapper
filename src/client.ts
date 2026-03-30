@@ -97,7 +97,7 @@ export class WhatsAppClient {
 
         this.client.on('ready', () => {
             this.isInitialized = true;
-            this.reinitAttempts = 0; // reset on successful connection
+            this.reinitAttempts = 0;
             if (this.config.onReady) {
                 this.config.onReady();
             } else {
@@ -120,7 +120,6 @@ export class WhatsAppClient {
             if (this.config.onAuthFailure) {
                 this.config.onAuthFailure(msg);
             }
-            // Wipe saved session so the next init shows a fresh QR
             this.clearAuthSession();
             this.scheduleReinit();
         });
@@ -131,7 +130,6 @@ export class WhatsAppClient {
             if (this.config.onDisconnected) {
                 this.config.onDisconnected(reason);
             }
-            // LOGOUT means the phone actively unlinked — wipe session + reinit
             if (reason === 'LOGOUT') {
                 this.clearAuthSession();
             }
@@ -149,10 +147,6 @@ export class WhatsAppClient {
 
     // ── Session management ────────────────────────────────────────────────────
 
-    /**
-     * Deletes the saved Puppeteer auth session so the next initialize()
-     * starts fresh and presents a new QR code.
-     */
     private clearAuthSession(): void {
         try {
             if (fs.existsSync(AUTH_DIR)) {
@@ -164,10 +158,6 @@ export class WhatsAppClient {
         }
     }
 
-    /**
-     * Waits REINIT_DELAY ms then destroys the old browser instance and
-     * creates a fresh Client, triggering a new QR code flow.
-     */
     private scheduleReinit(): void {
         if (this.reinitAttempts >= MAX_REINIT) {
             console.error(`❌ Gave up reinitialising after ${MAX_REINIT} attempts.`);
@@ -188,7 +178,6 @@ export class WhatsAppClient {
                 await this.client.initialize();
             } catch (err) {
                 console.error('❌ Reinit failed:', err);
-                // If it crashed again (e.g. ProtocolError), wipe session and retry
                 this.clearAuthSession();
                 this.scheduleReinit();
             }
@@ -209,7 +198,6 @@ export class WhatsAppClient {
             await this.client.initialize();
         } catch (err: any) {
             console.error('❌ Initialize error:', err?.message ?? err);
-            // ProtocolError / context destroyed — wipe bad session and retry
             this.clearAuthSession();
             this.scheduleReinit();
         }
@@ -310,6 +298,22 @@ export class WhatsAppClient {
         return chat.sendMessage(message);
     }
 
+    /**
+     * Mark all messages in a chat as read (equivalent to opening the chat on your phone).
+     * Fire-and-forget — errors are non-fatal.
+     */
+    public async markChatAsRead(chatId: string): Promise<void> {
+        if (!this.isInitialized) return;
+
+        let formattedId = chatId;
+        if (!formattedId.includes('@') && !formattedId.includes('-')) {
+            formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
+        }
+
+        const chat = await this.client.getChatById(formattedId);
+        await chat.sendSeen();
+    }
+
     public async sendSticker(to: string, stickerPath: string): Promise<void> {
         if (!this.isInitialized) throw new Error('Client not initialized.');
 
@@ -340,29 +344,17 @@ export class WhatsAppClient {
         }
     }
 
-
-    /**
-     * Download media for a specific message by its ID within a chat.
-     * Returns null if the message has no media or download fails.
-     */
-    /**
-     * Download media for a message identified by its serialized ID.
-     * Parses the chatId from the serialized ID, then scans fetchMessages to find it.
-     * serializedId format: "false_<number>@c.us_<hexId>" or "true_<number>@c.us_<hexId>"
-     */
     public async getMessageMedia(serializedId: string): Promise<{ mimetype: string; data: string } | null> {
         if (!this.isInitialized) throw new Error('Client not initialized.');
 
         try {
-            // Extract chatId from serialized ID: false_5511999@c.us_3EB0... → 5511999@c.us
             const parts = serializedId.split('_');
             if (parts.length < 3) throw new Error(`Cannot parse serializedId: ${serializedId}`);
-            const chatId = parts[1]; // e.g. "5511999@c.us"
-            const shortId = parts.slice(2).join('_'); // the hex part
+            const chatId = parts[1];
+            const shortId = parts.slice(2).join('_');
 
             const chat = await this.client.getChatById(chatId);
 
-            // Try increasing fetch windows until we find the message
             for (const limit of [50, 200, 500]) {
                 const messages = await chat.fetchMessages({ limit });
                 const msg = messages.find(m => m.id._serialized === serializedId || m.id.id === shortId);

@@ -1,12 +1,13 @@
 import fetch from 'node-fetch';
-import { GEMINI_BASE_URL, GEMINI_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from '../constants';
+import { GEMINI_BASE_URL, GEMINI_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
+import { parsePartsResponse } from './groq';
 
 interface GeminiPart {
     text: string;
 }
 
 interface GeminiContent {
-    role: 'user' | 'model'; // Gemini uses 'model' instead of 'assistant'
+    role: 'user' | 'model';
     parts: GeminiPart[];
 }
 
@@ -83,7 +84,6 @@ class GeminiClient {
         return text;
     }
 
-    /** Convert a flat role/content message list into Gemini's contents format. */
     private toGeminiContents(
         messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
     ): { contents: GeminiContent[]; systemPrompt: string | undefined } {
@@ -92,7 +92,6 @@ class GeminiClient {
 
         for (const msg of messages) {
             if (msg.role === 'system') {
-                // Gemini handles system prompt separately
                 systemPrompt = msg.content;
             } else {
                 contents.push({
@@ -105,7 +104,6 @@ class GeminiClient {
         return { contents, systemPrompt };
     }
 
-    /** Send a full message history (OpenAI-style roles) and get a reply. */
     async getResponseFromHistory(
         chatHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
         options?: { temperature?: number; max_tokens?: number }
@@ -114,7 +112,6 @@ class GeminiClient {
         return this.post(contents, systemPrompt, options);
     }
 
-    /** Convenience: system prompt + flat message list. */
     async getResponseWithSystem(
         systemPrompt: string,
         userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -127,19 +124,15 @@ class GeminiClient {
         return this.post(contents, systemPrompt, options);
     }
 
-    /** One-shot question. */
     async ask(question: string): Promise<string> {
         return this.post([{ role: 'user', parts: [{ text: question }] }]);
     }
 
-    /**
-     * Generate a draft reply for a pooled WhatsApp conversation.
-     * Drop-in replacement for KimiClient.generateWhatsAppDraft.
-     */
     async generateWhatsAppDraft(
         messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
-        systemPrompt = DEFAULT_SYSTEM_PROMPT
-    ): Promise<string> {
+        maxParts: number = getMaxDraftParts()
+    ): Promise<string[]> {
+        const systemPrompt = getSystemPrompt(maxParts);
         const conversationText = messages
             .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)
             .join('\n');
@@ -153,14 +146,15 @@ class GeminiClient {
             },
         ];
 
-        return this.post(contents, systemPrompt, {
+        const raw = await this.post(contents, systemPrompt, {
             max_tokens:  process.env.GEMINI_MAX_TOKENS  ? parseInt(process.env.GEMINI_MAX_TOKENS)    : undefined,
             temperature: process.env.GEMINI_TEMPERATURE ? parseFloat(process.env.GEMINI_TEMPERATURE) : undefined,
         });
+
+        return parsePartsResponse(raw, maxParts);
     }
 }
 
-// ─── Singleton ────────────────────────────────────────────────────────────────
 let _instance: GeminiClient | null = null;
 
 export function getGeminiClient(): GeminiClient {
