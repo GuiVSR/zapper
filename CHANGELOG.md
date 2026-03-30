@@ -2,6 +2,35 @@
 
 All notable changes to Zapper will be documented here.
 
+## [1.2.0] — 2026-03-30
+
+**Author:** GuiVSR
+
+### AI draft splitting & read receipts
+
+#### Added
+- **Draft splitting** — AI replies are now split into multiple separate WhatsApp message parts (default: 3). Each part appears as its own editable card in the draft banner with individual **✅ Send this** and **✕ remove** buttons
+- **Parts input** in the sidebar toolbar — controls how many parts the AI should split its reply into (1–10); synced to the server in real time so the auto-pool also respects the setting
+- **⊕ Merge button** — collapses all parts back into a single message when you decide one message is better
+- **✅ Send all N** — sends each part as a separate WhatsApp message in sequence
+- `POST /api/settings` endpoint — updates runtime settings (currently `maxDraftParts`) without triggering a generation, keeping the auto-pool in sync with whatever the UI shows
+- **Mark as read on send** — clicking Send (manual, draft, or any part) now calls `chat.sendSeen()` on the server, sending blue double-tick read receipts and clearing the unread count instantly; the sidebar badge also zeroes out immediately in the UI
+- `markChatAsRead()` public method on `WhatsAppClient` — wraps `chat.sendSeen()` for any chatId
+
+#### Changed
+- `AIDraft.draft: string` replaced by `AIDraft.parts: string[]` — always an array; single-part drafts have length 1, preserving backwards-compatible behaviour when Parts = 1
+- `generateWhatsAppDraft()` on all LLM clients (Groq, DeepSeek, Gemini, Kimi) now returns `string[]` and accepts a `maxParts` parameter
+- `DEFAULT_MAX_DRAFT_PARTS` in `constants.ts` set to **3** — default for new sessions
+- `getSystemPrompt(maxParts)` now accepts a `maxParts` argument: injects a JSON-array instruction when `> 1`, and an explicit plain-text-only instruction when `= 1` to prevent the model returning accidental JSON
+- `MessageHandler.maxDraftParts` is now a public runtime property updated by both the API and the on-demand generation path, so the auto-pool (10-second silence window) always uses the same value as the UI
+- `POST /api/generate-drafts` no longer mutates `process.env` — `maxDraftParts` is now passed explicitly through the call chain, eliminating a concurrency race condition
+
+#### Fixed
+- Draft banner was displaying raw JSON (e.g. `["Boa tarde!", "..."]`) as a single string instead of parsed parts — `parsePartsResponse` now always attempts JSON parsing regardless of `maxParts`, with four fallback strategies: direct parse → double-encoded string parse → regex bracket extraction → blank-line paragraph split
+- Parts input defaulting to 1 in the UI had no effect on auto-pooled drafts because the pool flush was reading `process.env.MAX_DRAFT_PARTS` (unset) instead of the UI-controlled value
+
+---
+
 ## [1.1.0] — 2026-03-29
 
 **Author:** GuiVSR
@@ -43,8 +72,6 @@ First working version of Zapper, a WhatsApp Web client with AI-powered reply dra
 - Bot commands: `/ping`, `/help`, `/status`, `/chats`
 - Optional webhook forwarding for inbound messages
 - Blue UI theme
-
----
 
 ---
 
