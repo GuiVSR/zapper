@@ -32,13 +32,11 @@ export function getMaxDraftParts(): number {
 // ── LLM — API base URLs ───────────────────────────────────────────────────────
 export const GROQ_BASE_URL       = 'https://api.groq.com/openai/v1';
 export const DEEPSEEK_BASE_URL   = 'https://api.deepseek.com';
-export const KIMI_BASE_URL       = 'https://api.moonshot.cn/v1';
 export const GEMINI_BASE_URL     = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // ── LLM — default models ──────────────────────────────────────────────────────
 export const GROQ_DEFAULT_MODEL      = 'llama-3.3-70b-versatile';
 export const DEEPSEEK_DEFAULT_MODEL  = 'deepseek-chat';
-export const KIMI_DEFAULT_MODEL      = 'moonshot-v1-8k';
 export const GEMINI_DEFAULT_MODEL    = 'gemini-2.5-flash';
 
 // ── LLM — default generation params ──────────────────────────────────────────
