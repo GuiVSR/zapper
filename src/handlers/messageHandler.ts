@@ -1,6 +1,7 @@
 import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
 import { getLLMClient } from '../llm';
+import { transcribeAudio } from '../transcription/deepgram';
 import chalk from 'chalk';
 import {
     POOL_WINDOW_MS,
@@ -32,6 +33,7 @@ export interface AIDraft {
 }
 
 export type DraftCallback = (draft: AIDraft) => void;
+export type TranscriptionCallback = (data: { messageId: string; chatId: string; transcript: string }) => void;
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
@@ -39,16 +41,18 @@ export class MessageHandler {
     private client: WhatsAppClient;
     private webhookUrl?: string;
     private onDraft?: DraftCallback;
+    private onTranscription?: TranscriptionCallback;
 
     public maxDraftParts: number = getMaxDraftParts();
 
     private pools  = new Map<string, PooledMessage[]>();
     private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-    constructor(client: WhatsAppClient, webhookUrl?: string, onDraft?: DraftCallback) {
-        this.client     = client;
-        this.webhookUrl = webhookUrl;
-        this.onDraft    = onDraft;
+    constructor(client: WhatsAppClient, webhookUrl?: string, onDraft?: DraftCallback, onTranscription?: TranscriptionCallback) {
+        this.client          = client;
+        this.webhookUrl      = webhookUrl;
+        this.onDraft         = onDraft;
+        this.onTranscription = onTranscription;
     }
 
     // ── Public entry point ────────────────────────────────────────────────────
@@ -85,7 +89,9 @@ export class MessageHandler {
                 if (message.body) console.log(chalk.white(`Caption: ${message.body}`));
                 break;
             case 'audio':
+            case 'ptt':
                 console.log(chalk.magenta(`🎵 Audio received`));
+                await this.handleAudioTranscription(message);
                 break;
             case 'document':
                 console.log(chalk.magenta(`📄 Document received`));
@@ -140,13 +146,13 @@ export class MessageHandler {
                     const description = await llm.analyzeImage(media.data, media.mimetype, message.id.id);
                     saveDescription(message.id.id, description); // persist to disk
                     console.log(chalk.blue(`[Vision] Description (preview): ${description.slice(0, 120)}…`));
-                    this.poolMessage(message, description);
+                    this.poolMessage(message, undefined, description);
                 } else {
-                    this.poolMessage(message, '[Image could not be downloaded]');
+                    this.poolMessage(message, undefined, '[Image could not be downloaded]');
                 }
             } catch (err) {
                 console.error(chalk.red('[Vision] Image analysis failed:'), err);
-                this.poolMessage(message, '[Image analysis failed]');
+                this.poolMessage(message, undefined, '[Image analysis failed]');
             }
         } else {
             this.poolMessage(message);
@@ -160,10 +166,14 @@ export class MessageHandler {
 
     // ── Pooling ───────────────────────────────────────────────────────────────
 
-    private poolMessage(message: Message, imageDescription?: string): void {
+    private poolMessage(message: Message, overrideBody?: string, imageDescription?: string): void {
         if (message.fromMe) return;
-        if (message.type !== 'chat' && message.type !== 'image') return;
-        if (message.type === 'chat' && !message.body?.trim()) return;
+
+        const body = overrideBody ?? message.body;
+
+        // Accept text, image, and transcribed audio/ptt
+        if (message.type !== 'chat' && message.type !== 'image' && !overrideBody) return;
+        if (!body?.trim() && !imageDescription) return;
 
         const chatId: string = message.from;
 
@@ -175,7 +185,7 @@ export class MessageHandler {
             id:               message.id.id,
             from:             message.from,
             to:               message.to,
-            body:             message.body || '',
+            body:             body || '',
             timestamp:        message.timestamp,
             type:             message.type,
             fromMe:           message.fromMe,
@@ -196,6 +206,33 @@ export class MessageHandler {
                 `timer reset to ${POOL_WINDOW_MS / 1000}s`
             )
         );
+    }
+
+    private async handleAudioTranscription(message: Message): Promise<void> {
+        if (message.fromMe) return;
+        if (!message.hasMedia) return;
+
+        try {
+            const media = await message.downloadMedia();
+            if (!media) {
+                console.warn(chalk.yellow('[Transcription] Could not download audio media'));
+                return;
+            }
+
+            const audioBuffer = Buffer.from(media.data, 'base64');
+            const transcript = await transcribeAudio(audioBuffer, media.mimetype);
+
+            if (!transcript) return;
+
+            // Emit transcription to the frontend
+            this.onTranscription?.({ messageId: message.id.id, chatId: message.from, transcript });
+
+            // Pool the transcript as if it were a text message
+            const label = message.type === 'ptt' ? 'Voice message' : 'Audio';
+            this.poolMessage(message, `[${label} transcription]: ${transcript}`);
+        } catch (err) {
+            console.error(chalk.red('[Transcription] Failed to transcribe audio:'), err);
+        }
     }
 
     private async flushPool(chatId: string): Promise<void> {

@@ -30,6 +30,10 @@ export function getMaxDraftParts(): number {
     return Number.isFinite(val) && val >= 1 ? val : DEFAULT_MAX_DRAFT_PARTS;
 }
 
+// ── Deepgram (audio transcription) ────────────────────────────────────────────
+export const DEEPGRAM_BASE_URL   = 'https://api.deepgram.com/v1/listen';
+export const DEEPGRAM_MODEL      = 'nova-2';
+
 // ── LLM — API base URLs ───────────────────────────────────────────────────────
 export const GROQ_BASE_URL       = 'https://api.groq.com/openai/v1';
 export const DEEPSEEK_BASE_URL   = 'https://api.deepseek.com';

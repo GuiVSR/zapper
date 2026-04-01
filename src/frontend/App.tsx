@@ -77,6 +77,7 @@ function App() {
     const [drafts, setDrafts]               = useState<Record<string, AIDraft>>({});
     const [media, setMedia]                 = useState<Record<string, MediaItem>>({});
     const [lightbox, setLightbox]           = useState<MediaItem | null>(null);
+    const [transcriptions, setTranscriptions] = useState<Record<string, string>>({});
 
     // Multi-select
     const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -146,6 +147,10 @@ function App() {
             setMedia(prev => ({ ...prev, [item.messageId]: item }));
         });
 
+        socket.on('transcription', (data: { messageId: string; transcript: string }) => {
+            setTranscriptions(prev => ({ ...prev, [data.messageId]: data.transcript }));
+        });
+
         return () => { socket.disconnect(); };
     }, []);
 
@@ -163,7 +168,7 @@ function App() {
 
     const fetchMediaForMessages = (msgs: Message[]) => {
         msgs
-            .filter(m => m.hasMedia && m.type === 'image' && m.serializedId)
+            .filter(m => m.hasMedia && (m.type === 'image' || m.type === 'audio' || m.type === 'ptt') && m.serializedId)
             .forEach(async msg => {
                 try {
                     const res = await fetch(
@@ -492,12 +497,24 @@ function App() {
                                                 onClick={() => setLightbox(media[msg.id])}
                                             />
                                         )}
+                                        {media[msg.id] && media[msg.id].mimetype.startsWith('audio/') && (
+                                            <audio
+                                                className="bubble-audio"
+                                                controls
+                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
+                                            />
+                                        )}
+                                        {transcriptions[msg.id] && (
+                                            <div className="transcription">
+                                                {transcriptions[msg.id]}
+                                            </div>
+                                        )}
                                         {msg.body && <div>{msg.body}</div>}
                                         {msg.hasMedia && !media[msg.id] && (
                                             <div className="media-placeholder">
                                                 {msg.type === 'image'    ? '🖼️ Loading image…'  :
                                                  msg.type === 'video'    ? '🎥 Video'            :
-                                                 msg.type === 'audio'    ? '🎵 Audio'            :
+                                                 msg.type === 'audio' || msg.type === 'ptt' ? '🎵 Loading audio…' :
                                                  msg.type === 'document' ? '📄 Document'         :
                                                  msg.type === 'sticker'  ? '🎨 Sticker'          :
                                                                            '📎 Media'}
