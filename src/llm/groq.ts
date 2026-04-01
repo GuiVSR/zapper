@@ -1,4 +1,13 @@
-import { GROQ_BASE_URL, GROQ_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
+import {
+    GROQ_BASE_URL,
+    GROQ_DEFAULT_MODEL,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    getSystemPrompt,
+    getMaxDraftParts,
+    IMAGE_ANALYSIS_PROMPT,
+} from '../constants';
+import { debugPrompt, debugResponse, debugImageAnalysis } from '../debug';
 
 export interface GroqMessage {
     role: 'system' | 'user' | 'assistant';
@@ -37,7 +46,7 @@ class GroqClient {
     constructor(apiKey: string, model = GROQ_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('Groq API key is required.');
         this.apiKey = apiKey;
-        this.model = model;
+        this.model  = model;
     }
 
     private async post(
@@ -74,7 +83,6 @@ class GroqClient {
         return content;
     }
 
-    /** Send a full message history and get a reply. */
     async getResponseFromHistory(
         chatHistory: GroqMessage[],
         options?: { temperature?: number; max_tokens?: number; model?: string }
@@ -82,7 +90,6 @@ class GroqClient {
         return this.post(chatHistory, options);
     }
 
-    /** Convenience: system prompt + flat message list. */
     async getResponseWithSystem(
         systemPrompt: string,
         userMessages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -91,27 +98,77 @@ class GroqClient {
         return this.post([{ role: 'system', content: systemPrompt }, ...userMessages], options);
     }
 
-    /** One-shot question. */
     async ask(question: string): Promise<string> {
         return this.post([{ role: 'user', content: question }]);
     }
 
-    /**
-     * Generate a draft reply for a WhatsApp conversation.
-     *
-     * Returns a string[] — always an array:
-     *   - length 1  → single message (maxParts === 1 or model returned plain text)
-     *   - length >1 → split parts the user can send individually or merge
-     */
+    async analyzeImage(
+        base64Data: string,
+        mimeType: string,
+        prompt: string = IMAGE_ANALYSIS_PROMPT,
+        messageId = 'unknown'
+    ): Promise<string> {
+        const visionModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
+
+        const payload = {
+            model: visionModel,
+            messages: [
+                {
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'image_url',
+                            image_url: { url: `data:${mimeType};base64,${base64Data}` },
+                        },
+                        { type: 'text', text: prompt },
+                    ],
+                },
+            ],
+            max_tokens:  1000,
+            temperature: 0.2,
+        };
+
+        const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type':  'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json() as GroqResponse;
+        if (!response.ok) {
+            throw new Error(`Groq vision error: ${data.error?.message ?? response.status}`);
+        }
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) throw new Error('Groq vision returned empty response.');
+
+        debugImageAnalysis('Groq', visionModel, messageId, mimeType, prompt, content);
+
+        return content;
+    }
+
     async generateWhatsAppDraft(
-        messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
+        messages: Array<{ body: string; fromMe: boolean; timestamp: number; imageDescription?: string }>,
         maxParts: number = getMaxDraftParts()
     ): Promise<string[]> {
         const systemPrompt = getSystemPrompt(maxParts);
+        const activeModel  = process.env.GROQ_MODEL ?? this.model;
 
         const conversationText = messages
-            .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)
+            .map(m => {
+                const speaker = m.fromMe ? '[You]' : '[Customer]';
+                const body    = m.body?.trim() || '';
+                const imgDesc = m.imageDescription;
+                if (imgDesc) {
+                    return `${speaker} [sent an image${body ? ` with caption: "${body}"` : ''}]\n[Image description: ${imgDesc}]`;
+                }
+                return `${speaker} ${body}`;
+            })
             .join('\n');
+
+        debugPrompt('Groq', activeModel, systemPrompt, conversationText, maxParts);
 
         const raw = await this.post(
             [
@@ -127,26 +184,15 @@ class GroqClient {
             }
         );
 
-        return parsePartsResponse(raw, maxParts);
+        const parts = parsePartsResponse(raw, maxParts);
+        debugResponse('Groq', raw, parts);
+        return parts;
     }
 }
 
 // ─── Shared parser ────────────────────────────────────────────────────────────
 
-/**
- * Attempts to parse a JSON array from the model output.
- * Falls back to a single-element array containing the raw text so callers
- * never have to handle a non-array return value.
- *
- * Handles these common model misbehaviours:
- *   1. Wrapped in ```json ... ``` fences
- *   2. Double-encoded: the model returned a JSON *string* whose value is a JSON array
- *   3. Plain text with no JSON at all → split on double newlines as a best-effort
- */
 export function parsePartsResponse(raw: string, maxParts: number): string[] {
-    // Helper: validate a value as string[] and cap to maxParts.
-    // When the model returns more parts than requested we keep them all —
-    // the user can merge manually in the UI.
     const toStringArray = (val: unknown): string[] | null => {
         if (Array.isArray(val) && val.length > 0 && val.every(p => typeof p === 'string')) {
             const parts = (val as string[]).filter(p => p.trim().length > 0);
@@ -155,20 +201,15 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
         return null;
     };
 
-    // Strip markdown code fences
     const cleaned = raw
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/, '')
         .trim();
 
-    // Attempt 1: direct JSON parse — handles the primary case where the model
-    // returns a JSON array even when maxParts=1 (model habit from prior prompts)
     try {
         const parsed = JSON.parse(cleaned);
         const arr = toStringArray(parsed);
         if (arr) return arr;
-
-        // Attempt 2: model returned a JSON string whose content is the array
         if (typeof parsed === 'string') {
             const inner = JSON.parse(parsed);
             const arr2 = toStringArray(inner);
@@ -176,7 +217,6 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
         }
     } catch { /* fall through */ }
 
-    // Attempt 3: find the first [...] block anywhere in the output
     const bracketMatch = cleaned.match(/\[[\s\S]*?\]/);
     if (bracketMatch) {
         try {
@@ -185,15 +225,11 @@ export function parsePartsResponse(raw: string, maxParts: number): string[] {
         } catch { /* fall through */ }
     }
 
-    // Attempt 4: if maxParts > 1 and plain prose, split on blank lines
     if (maxParts > 1) {
         const paragraphs = cleaned.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-        if (paragraphs.length > 1) {
-            return paragraphs.slice(0, maxParts);
-        }
+        if (paragraphs.length > 1) return paragraphs.slice(0, maxParts);
     }
 
-    // Last resort: single plain-text part
     return [cleaned];
 }
 

@@ -1,6 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // constants.ts — single source of truth for all project-wide constants.
-// Import from here instead of defining magic values inline.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Server ────────────────────────────────────────────────────────────────────
@@ -10,18 +9,16 @@ export const SERVER_PORT         = 3000;
 export const API_BASE_URL        = 'http://127.0.0.1:3000';
 
 // ── API defaults ──────────────────────────────────────────────────────────────
-export const DEFAULT_HISTORY_LIMIT    = 50;  // messages fetched per chat history request
-export const DEFAULT_SEARCH_LIMIT     = 50;  // messages returned per search request
-export const DEFAULT_CHATS_LIMIT      = 10;  // chats returned by chats-with-messages endpoint
-export const DEFAULT_SIDEBAR_CHATS    = 5;   // chats shown in the /chats command
+export const DEFAULT_HISTORY_LIMIT    = 50;
+export const DEFAULT_SEARCH_LIMIT     = 50;
+export const DEFAULT_CHATS_LIMIT      = 10;
+export const DEFAULT_SIDEBAR_CHATS    = 5;
 
 // ── Message pooling ───────────────────────────────────────────────────────────
-export const POOL_WINDOW_MS      = 10_000;  // wait this long after last message before drafting
-export const HISTORY_CONTEXT     = 25;      // prior messages to include as AI context
+export const POOL_WINDOW_MS      = 10_000;
+export const HISTORY_CONTEXT     = 25;
 
 // ── AI draft splitting ────────────────────────────────────────────────────────
-// How many parts the AI should split its reply into (1 = no split).
-// Can be overridden at runtime via the MAX_DRAFT_PARTS env var.
 export const DEFAULT_MAX_DRAFT_PARTS = 3;
 
 export function getMaxDraftParts(): number {
@@ -44,20 +41,10 @@ export const DEFAULT_TEMPERATURE     = 0.7;
 export const DEFAULT_MAX_TOKENS      = 500;
 
 // ── LLM — system prompt ───────────────────────────────────────────────────────
-// Fallback used when SYSTEM_PROMPT is not set in .env
 export const DEFAULT_SYSTEM_PROMPT = `You are a helpful customer support assistant.
 Respond in the same language the customer wrote in.
 Keep replies concise and friendly.`;
 
-/**
- * Returns the active system prompt, optionally injecting a splitting instruction.
- *
- * When maxParts > 1 the prompt tells the model to return a JSON array of strings
- * (one element per message part). When maxParts === 1 the model returns plain text
- * as before — no behaviour change for existing users who don't touch the setting.
- *
- * Priority for base prompt: SYSTEM_PROMPT env var → DEFAULT_SYSTEM_PROMPT constant.
- */
 export function getSystemPrompt(maxParts: number = 1): string {
     const base = process.env.SYSTEM_PROMPT?.trim() || DEFAULT_SYSTEM_PROMPT;
 
@@ -79,9 +66,12 @@ Example for maxParts=3: ["Hello! Thanks for reaching out.", "Here is the informa
 }
 
 // ── LLM — provider selection ──────────────────────────────────────────────────
-// See src/llm/index.ts for getLLMClient() — kept server-side to avoid bundling
-// Node.js modules into the frontend Webpack build.
 export type LLMProvider = 'groq' | 'gemini' | 'deepseek';
+
+// ── Image analysis ────────────────────────────────────────────────────────────
+export const IMAGE_ANALYSIS_PROMPT = `* If there is readable text, transcribe it in full in the same language in which the text was written, respecting the sequence.
+* If there are images or other objects, describe the visual content in maximum detail (objects, scenery, colors, position). Also respect the order — so if there is text followed by images, alternate the fully extracted text with the description. The description must be detailed enough to allow its reproduction by an LLM that will read the description and replicate it in HTML or image generation.
+   1. Reproduce exactly all received text, without placeholders or suppressions. Do not fail to describe any visual element.`;
 
 // ── Favicon ───────────────────────────────────────────────────────────────────
 export const FAVICON_SIZE        = 32;

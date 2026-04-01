@@ -315,7 +315,7 @@ function App() {
             await fetch(`${API_BASE_URL}/api/generate-drafts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatIds: [selectedChat.id], limit: messageLimit, maxDraftParts }),
+                body: JSON.stringify({ chatIds: [selectedChat.id], limit: messageLimit, maxDraftParts: 1 }),
             });
         } catch (err: any) { setError(err.message); setGeneratingDraft(false); }
     };

@@ -2,7 +2,13 @@ import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
 import { getLLMClient } from '../llm';
 import chalk from 'chalk';
-import { POOL_WINDOW_MS, HISTORY_CONTEXT, DEFAULT_SIDEBAR_CHATS, getMaxDraftParts } from '../constants';
+import {
+    POOL_WINDOW_MS,
+    HISTORY_CONTEXT,
+    DEFAULT_SIDEBAR_CHATS,
+    getMaxDraftParts,
+} from '../constants';
+import { getDescriptions, saveDescription } from '../llm/imageCache';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,11 +21,11 @@ export interface PooledMessage {
     type: string;
     fromMe: boolean;
     hasMedia: boolean;
+    imageDescription?: string;
 }
 
 export interface AIDraft {
     chatId: string;
-    /** One element per message part. Single-part drafts have length 1. */
     parts: string[];
     basedOnMessages: PooledMessage[];
     generatedAt: number;
@@ -27,24 +33,22 @@ export interface AIDraft {
 
 export type DraftCallback = (draft: AIDraft) => void;
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Handler ───────────────────────────────────────────────────────────────────
 
 export class MessageHandler {
     private client: WhatsAppClient;
     private webhookUrl?: string;
     private onDraft?: DraftCallback;
 
-    // Runtime-settable — updated by the API whenever the frontend changes the value
     public maxDraftParts: number = getMaxDraftParts();
 
-    // Pooling state — one entry per chatId
     private pools  = new Map<string, PooledMessage[]>();
     private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
     constructor(client: WhatsAppClient, webhookUrl?: string, onDraft?: DraftCallback) {
-        this.client    = client;
+        this.client     = client;
         this.webhookUrl = webhookUrl;
-        this.onDraft   = onDraft;
+        this.onDraft    = onDraft;
     }
 
     // ── Public entry point ────────────────────────────────────────────────────
@@ -58,9 +62,9 @@ export class MessageHandler {
             contactName = message.from;
         }
 
-        const timestamp  = new Date().toLocaleString();
-        const isFromMe   = message.fromMe;
-        const sender     = isFromMe ? '📤 You' : `📥 ${contactName}`;
+        const timestamp = new Date().toLocaleString();
+        const isFromMe  = message.fromMe;
+        const sender    = isFromMe ? '📤 You' : `📥 ${contactName}`;
 
         console.log('\n' + '═'.repeat(60));
         console.log(chalk.cyan(`[${timestamp}]`));
@@ -105,14 +109,16 @@ export class MessageHandler {
 
         if (message.hasMedia) {
             console.log(chalk.gray(`📎 Has media attachment`));
-            try {
-                const media = await message.downloadMedia();
-                if (media) {
-                    console.log(chalk.gray(`   MIME type: ${media.mimetype}`));
-                    console.log(chalk.gray(`   Size: ${(media.data.length / 1024).toFixed(2)} KB`));
+            if (message.type !== 'image') {
+                try {
+                    const media = await message.downloadMedia();
+                    if (media) {
+                        console.log(chalk.gray(`   MIME type: ${media.mimetype}`));
+                        console.log(chalk.gray(`   Size: ${(media.data.length / 1024).toFixed(2)} KB`));
+                    }
+                } catch {
+                    console.log(chalk.gray(`   Could not get media info`));
                 }
-            } catch {
-                console.log(chalk.gray(`   Could not get media info`));
             }
         }
 
@@ -124,8 +130,27 @@ export class MessageHandler {
             return;
         }
 
-        // Pool inbound text messages for AI draft generation
-        this.poolMessage(message);
+        // ── Pool inbound messages ─────────────────────────────────────────────
+        if (!message.fromMe && message.type === 'image') {
+            try {
+                console.log(chalk.blue(`[Vision] Analyzing image from ${message.from}…`));
+                const media = await message.downloadMedia();
+                if (media) {
+                    const llm         = getLLMClient();
+                    const description = await llm.analyzeImage(media.data, media.mimetype, message.id.id);
+                    saveDescription(message.id.id, description); // persist to disk
+                    console.log(chalk.blue(`[Vision] Description (preview): ${description.slice(0, 120)}…`));
+                    this.poolMessage(message, description);
+                } else {
+                    this.poolMessage(message, '[Image could not be downloaded]');
+                }
+            } catch (err) {
+                console.error(chalk.red('[Vision] Image analysis failed:'), err);
+                this.poolMessage(message, '[Image analysis failed]');
+            }
+        } else {
+            this.poolMessage(message);
+        }
 
         // Webhook forwarding (inbound only)
         if (this.webhookUrl && !isFromMe) {
@@ -135,10 +160,10 @@ export class MessageHandler {
 
     // ── Pooling ───────────────────────────────────────────────────────────────
 
-    private poolMessage(message: Message): void {
-        if (message.fromMe)              return;
-        if (message.type !== 'chat')     return;
-        if (!message.body?.trim())       return;
+    private poolMessage(message: Message, imageDescription?: string): void {
+        if (message.fromMe) return;
+        if (message.type !== 'chat' && message.type !== 'image') return;
+        if (message.type === 'chat' && !message.body?.trim()) return;
 
         const chatId: string = message.from;
 
@@ -147,14 +172,15 @@ export class MessageHandler {
         }
 
         this.pools.get(chatId)!.push({
-            id:        message.id.id,
-            from:      message.from,
-            to:        message.to,
-            body:      message.body,
-            timestamp: message.timestamp,
-            type:      message.type,
-            fromMe:    message.fromMe,
-            hasMedia:  message.hasMedia,
+            id:               message.id.id,
+            from:             message.from,
+            to:               message.to,
+            body:             message.body || '',
+            timestamp:        message.timestamp,
+            type:             message.type,
+            fromMe:           message.fromMe,
+            hasMedia:         message.hasMedia,
+            imageDescription,
         });
 
         if (this.timers.has(chatId)) {
@@ -179,23 +205,27 @@ export class MessageHandler {
 
         if (pooledMessages.length === 0 || !this.onDraft) return;
 
-        console.log(
-            chalk.blue(`[Pooler] Flushing ${pooledMessages.length} message(s) from ${chatId} → Groq`)
-        );
+        console.log(chalk.blue(`[Pooler] Flushing ${pooledMessages.length} message(s) from ${chatId} → LLM`));
 
         try {
-            let historyContext: PooledMessage[] = [];
+            let enrichedHistory: PooledMessage[] = [];
             try {
-                const history = await this.client.getChatHistory(chatId, HISTORY_CONTEXT + pooledMessages.length);
+                const history   = await this.client.getChatHistory(chatId, HISTORY_CONTEXT + pooledMessages.length);
                 const pooledIds = new Set(pooledMessages.map(m => m.id));
-                historyContext = history
-                    .filter(m => !pooledIds.has(m.id))
-                    .slice(-HISTORY_CONTEXT);
-            } catch (err) {
+                const priorMsgs = history.filter(m => !pooledIds.has(m.id)).slice(-HISTORY_CONTEXT);
+
+                // Attach any cached image descriptions to prior history messages
+                const descMap   = getDescriptions(priorMsgs.map(m => m.id));
+                enrichedHistory = priorMsgs.map(m => ({
+                    ...m,
+                    imageDescription: descMap[m.id],
+                }));
+            } catch {
                 console.warn(chalk.yellow(`[Pooler] Could not fetch history for ${chatId}, proceeding without context`));
             }
 
-            const fullContext = [...historyContext, ...pooledMessages];
+            // pooledMessages already carry live descriptions from handleMessage
+            const fullContext = [...enrichedHistory, ...pooledMessages];
             const maxParts    = this.maxDraftParts;
 
             const llm   = getLLMClient();
@@ -208,19 +238,17 @@ export class MessageHandler {
                 generatedAt: Math.floor(Date.now() / 1000),
             });
 
-            console.log(chalk.blue(`[Pooler] Draft generated for ${chatId} — ${parts.length} part(s) (context: ${historyContext.length} prior + ${pooledMessages.length} new)`));
+            console.log(chalk.blue(
+                `[Pooler] Draft generated for ${chatId} — ${parts.length} part(s) ` +
+                `(context: ${enrichedHistory.length} prior + ${pooledMessages.length} new)`
+            ));
         } catch (err) {
             console.error(chalk.red(`[Pooler] Failed to generate draft for ${chatId}:`), err);
         }
     }
 
-    /**
-     * On-demand draft generation — called by the API endpoint.
-     * maxParts is passed explicitly so the frontend value is always respected.
-     */
     public async generateDraftsForChats(chatIds: string[], limit: number, maxParts?: number): Promise<void> {
         const resolvedMaxParts = maxParts ?? this.maxDraftParts;
-        // Keep the stored value in sync so the auto-pool uses the same setting
         this.maxDraftParts = resolvedMaxParts;
 
         for (const chatId of chatIds) {
@@ -228,24 +256,33 @@ export class MessageHandler {
                 const history = await this.client.getChatHistory(chatId, limit);
                 if (history.length === 0) continue;
 
+                // Attach cached image descriptions to history messages
+                const descMap         = getDescriptions(history.map(m => m.id));
+                const enrichedHistory = history.map(m => ({
+                    ...m,
+                    imageDescription: descMap[m.id],
+                }));
+
                 const llm   = getLLMClient();
-                const parts = await llm.generateWhatsAppDraft(history, resolvedMaxParts);
+                const parts = await llm.generateWhatsAppDraft(enrichedHistory, resolvedMaxParts);
 
                 this.onDraft?.({
                     chatId,
                     parts,
-                    basedOnMessages: history,
+                    basedOnMessages: enrichedHistory,
                     generatedAt: Math.floor(Date.now() / 1000),
                 });
 
-                console.log(chalk.blue(`[OnDemand] Draft generated for ${chatId} — ${parts.length} part(s), maxParts=${resolvedMaxParts} (${history.length} messages)`));
+                console.log(chalk.blue(
+                    `[OnDemand] Draft generated for ${chatId} — ${parts.length} part(s), ` +
+                    `maxParts=${resolvedMaxParts} (${history.length} messages)`
+                ));
             } catch (err) {
                 console.error(chalk.red(`[OnDemand] Failed for ${chatId}:`), err);
             }
         }
     }
 
-    /** Cancel all pending timers — call this on server shutdown. */
     public destroy(): void {
         for (const timer of this.timers.values()) clearTimeout(timer);
         this.pools.clear();
@@ -281,7 +318,7 @@ export class MessageHandler {
                 break;
 
             case 'chats': {
-                const chats      = await this.client.getChats();
+                const chats       = await this.client.getChats();
                 const recentChats = chats.slice(0, DEFAULT_SIDEBAR_CHATS)
                     .map(c => `- ${c.name || c.id.user}: ${c.lastMessage?.body || 'No messages'}`)
                     .join('\n');

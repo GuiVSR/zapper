@@ -1,8 +1,18 @@
-import { GEMINI_BASE_URL, GEMINI_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
+import {
+    GEMINI_BASE_URL,
+    GEMINI_DEFAULT_MODEL,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    getSystemPrompt,
+    getMaxDraftParts,
+    IMAGE_ANALYSIS_PROMPT,
+} from '../constants';
 import { parsePartsResponse } from './groq';
+import { debugPrompt, debugResponse, debugImageAnalysis } from '../debug';
 
 interface GeminiPart {
-    text: string;
+    text?: string;
+    inline_data?: { mime_type: string; data: string };
 }
 
 interface GeminiContent {
@@ -12,13 +22,8 @@ interface GeminiContent {
 
 interface GeminiRequest {
     contents: GeminiContent[];
-    systemInstruction?: {
-        parts: GeminiPart[];
-    };
-    generationConfig?: {
-        temperature?: number;
-        maxOutputTokens?: number;
-    };
+    systemInstruction?: { parts: GeminiPart[] };
+    generationConfig?: { temperature?: number; maxOutputTokens?: number };
 }
 
 interface GeminiResponse {
@@ -26,11 +31,7 @@ interface GeminiResponse {
         content: GeminiContent;
         finishReason: string;
     }>;
-    error?: {
-        message: string;
-        code: number;
-        status: string;
-    };
+    error?: { message: string; code: number; status: string };
 }
 
 class GeminiClient {
@@ -40,7 +41,7 @@ class GeminiClient {
     constructor(apiKey: string, model = GEMINI_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('Gemini API key is required.');
         this.apiKey = apiKey;
-        this.model = model;
+        this.model  = model;
     }
 
     private async post(
@@ -51,8 +52,8 @@ class GeminiClient {
         const payload: GeminiRequest = {
             contents,
             generationConfig: {
-                temperature:      options?.temperature,
-                maxOutputTokens:  options?.max_tokens,
+                temperature:     options?.temperature,
+                maxOutputTokens: options?.max_tokens,
             },
         };
 
@@ -88,7 +89,6 @@ class GeminiClient {
     ): { contents: GeminiContent[]; systemPrompt: string | undefined } {
         let systemPrompt: string | undefined;
         const contents: GeminiContent[] = [];
-
         for (const msg of messages) {
             if (msg.role === 'system') {
                 systemPrompt = msg.content;
@@ -99,7 +99,6 @@ class GeminiClient {
                 });
             }
         }
-
         return { contents, systemPrompt };
     }
 
@@ -127,14 +126,48 @@ class GeminiClient {
         return this.post([{ role: 'user', parts: [{ text: question }] }]);
     }
 
+    async analyzeImage(
+        base64Data: string,
+        mimeType: string,
+        prompt: string = IMAGE_ANALYSIS_PROMPT,
+        messageId = 'unknown'
+    ): Promise<string> {
+        const contents: GeminiContent[] = [
+            {
+                role: 'user',
+                parts: [
+                    { inline_data: { mime_type: mimeType, data: base64Data } },
+                    { text: prompt },
+                ],
+            },
+        ];
+        const result = await this.post(contents, undefined, { temperature: 0.2, max_tokens: 1000 });
+
+        debugImageAnalysis('Gemini', this.model, messageId, mimeType, prompt, result);
+
+        return result;
+    }
+
     async generateWhatsAppDraft(
-        messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
+        messages: Array<{ body: string; fromMe: boolean; timestamp: number; imageDescription?: string }>,
         maxParts: number = getMaxDraftParts()
     ): Promise<string[]> {
         const systemPrompt = getSystemPrompt(maxParts);
+        const activeModel  = process.env.GEMINI_MODEL ?? this.model;
+
         const conversationText = messages
-            .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)
+            .map(m => {
+                const speaker = m.fromMe ? '[You]' : '[Customer]';
+                const body    = m.body?.trim() || '';
+                const imgDesc = m.imageDescription;
+                if (imgDesc) {
+                    return `${speaker} [sent an image${body ? ` with caption: "${body}"` : ''}]\n[Image description: ${imgDesc}]`;
+                }
+                return `${speaker} ${body}`;
+            })
             .join('\n');
+
+        debugPrompt('Gemini', activeModel, systemPrompt, conversationText, maxParts);
 
         const contents: GeminiContent[] = [
             {
@@ -150,7 +183,9 @@ class GeminiClient {
             temperature: process.env.GEMINI_TEMPERATURE ? parseFloat(process.env.GEMINI_TEMPERATURE) : undefined,
         });
 
-        return parsePartsResponse(raw, maxParts);
+        const parts = parsePartsResponse(raw, maxParts);
+        debugResponse('Gemini', raw, parts);
+        return parts;
     }
 }
 

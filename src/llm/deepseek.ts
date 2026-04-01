@@ -1,5 +1,14 @@
-import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, getSystemPrompt, getMaxDraftParts } from '../constants';
+import {
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_DEFAULT_MODEL,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    getSystemPrompt,
+    getMaxDraftParts,
+    IMAGE_ANALYSIS_PROMPT,
+} from '../constants';
 import { parsePartsResponse } from './groq';
+import { debugPrompt, debugResponse } from '../debug';
 
 export interface DeepSeekMessage {
     role: 'system' | 'user' | 'assistant';
@@ -25,11 +34,7 @@ interface DeepSeekResponse {
         completion_tokens: number;
         total_tokens: number;
     };
-    error?: {
-        message: string;
-        type: string;
-        code: string;
-    };
+    error?: { message: string; type: string; code: string };
 }
 
 class DeepSeekClient {
@@ -39,26 +44,25 @@ class DeepSeekClient {
     constructor(apiKey: string, model = DEEPSEEK_DEFAULT_MODEL) {
         if (!apiKey) throw new Error('DeepSeek API key is required.');
         this.apiKey = apiKey;
-        this.model = model;
+        this.model  = model;
     }
 
-    private async post(messages: DeepSeekMessage[], options?: {
-        temperature?: number;
-        max_tokens?: number;
-        model?: string;
-    }): Promise<string> {
+    private async post(
+        messages: DeepSeekMessage[],
+        options?: { temperature?: number; max_tokens?: number; model?: string }
+    ): Promise<string> {
         const payload: DeepSeekRequest = {
-            model: options?.model ?? this.model,
+            model:       options?.model       ?? this.model,
             messages,
             temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
-            max_tokens: options?.max_tokens ?? 500,
+            max_tokens:  options?.max_tokens  ?? 500,
         };
 
         const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
+                'Content-Type':  'application/json',
             },
             body: JSON.stringify(payload),
         });
@@ -96,14 +100,34 @@ class DeepSeekClient {
         return this.post([{ role: 'user', content: question }]);
     }
 
+    async analyzeImage(
+        _base64Data: string,
+        _mimeType: string,
+        _prompt: string = IMAGE_ANALYSIS_PROMPT
+    ): Promise<string> {
+        return '[Image received — vision analysis not supported by DeepSeek]';
+    }
+
     async generateWhatsAppDraft(
-        messages: Array<{ body: string; fromMe: boolean; timestamp: number }>,
+        messages: Array<{ body: string; fromMe: boolean; timestamp: number; imageDescription?: string }>,
         maxParts: number = getMaxDraftParts()
     ): Promise<string[]> {
         const systemPrompt = getSystemPrompt(maxParts);
+        const activeModel  = process.env.DEEPSEEK_MODEL ?? this.model;
+
         const conversationText = messages
-            .map(m => `${m.fromMe ? '[You]' : '[Customer]'} ${m.body}`)
+            .map(m => {
+                const speaker = m.fromMe ? '[You]' : '[Customer]';
+                const body    = m.body?.trim() || '';
+                const imgDesc = m.imageDescription;
+                if (imgDesc) {
+                    return `${speaker} [sent an image${body ? ` with caption: "${body}"` : ''}]\n[Image description: ${imgDesc}]`;
+                }
+                return `${speaker} ${body}`;
+            })
             .join('\n');
+
+        debugPrompt('DeepSeek', activeModel, systemPrompt, conversationText, maxParts);
 
         const raw = await this.post(
             [
@@ -119,7 +143,9 @@ class DeepSeekClient {
             }
         );
 
-        return parsePartsResponse(raw, maxParts);
+        const parts = parsePartsResponse(raw, maxParts);
+        debugResponse('DeepSeek', raw, parts);
+        return parts;
     }
 }
 
