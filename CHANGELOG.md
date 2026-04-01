@@ -2,6 +2,89 @@
 
 All notable changes to Zapper will be documented here.
 
+## [1.7.0] — 2026-04-01
+
+**Author:** GuiVSR
+
+### tmp/ folder consolidation
+
+#### Changed
+- **`src/client.ts`** — stickers directory moved from `./stickers` (project root) to `tmp/stickers/`; both `tmp/` and `tmp/stickers/` are created automatically on startup if they don't exist
+- **`src/llm/imageCache.ts`** — cache file moved from `.image-descriptions.json` (project root) to `tmp/.image-descriptions.json`; `tmp/` is created automatically on first import
+- **`.gitignore`** — added `tmp/` so stickers, the image cache, and any other runtime artefacts are never committed; removed the now-redundant `stickers` entry
+
+---
+
+## [1.6.0] — 2026-04-01
+
+**Author:** GuiVSR
+
+### Persistent image description cache
+
+#### Added
+- **`src/llm/imageCache.ts`** — new module that stores AI-generated image descriptions keyed by WhatsApp message ID:
+  - In-memory layer (`_cache`) loaded from disk exactly once on first access — all subsequent lookups are O(1) with zero disk I/O
+  - `hasDescription(id)` — fast guard used before any vision API call to guarantee an image is never analysed twice
+  - `getDescription(id)` — single-ID lookup
+  - `getDescriptions(ids[])` — batch lookup for history enrichment
+  - `saveDescription(id, desc)` — writes to memory and persists to disk immediately; no-op if value is unchanged
+  - `cacheSize()` — returns entry count for logging
+- **`enrichWithDescriptions()`** private method on `MessageHandler` — iterates history messages and for each image: checks cache first (instant hit), downloads + analyses only on a cache miss, saves result before continuing; called by both `flushPool` and `generateDraftsForChats`
+- **`hasDescription()` guard in `handleInboundImage()`** — live incoming images also check the cache before downloading, so duplicate deliveries of the same image never trigger a second API call
+
+#### Changed
+- `flushPool()` and `generateDraftsForChats()` in `messageHandler.ts` now call `enrichWithDescriptions()` instead of the plain `getDescriptions()` map — history images with no cached description are analysed on the spot before the draft prompt is built
+- Terminal now logs `[ImageCache] ✅ Cache hit for <id>` on reuse and `[ImageCache] Loaded N cached description(s) from disk` on server start
+
+---
+
+## [1.5.0] — 2026-04-01
+
+**Author:** GuiVSR
+
+### Image vision analysis
+
+#### Added
+- **`IMAGE_ANALYSIS_PROMPT`** constant in `src/constants.ts` — detailed extraction prompt that transcribes readable text verbatim and describes visual content with enough detail for an LLM to reproduce it
+- **`analyzeImage(base64, mimeType, prompt?, messageId?)`** method on all three LLM clients:
+  - **Groq** — uses `meta-llama/llama-4-scout-17b-16e-instruct` (vision-capable model, separate from the draft model)
+  - **Gemini** — uses `inline_data` multimodal content block on the configured Gemini model
+  - **DeepSeek** — returns a graceful fallback string (`[Image received — vision analysis not supported by DeepSeek]`)
+- **`analyzeImage`** added to the `LLMClient` type in `src/llm/index.ts` with full signature `(base64, mimeType, prompt?, messageId?) => Promise<string>`
+- **`handleInboundImage()`** private method on `MessageHandler` — extracted from `handleMessage` for clarity; downloads media, calls `analyzeImage`, saves description, then pools the message with description attached
+- Image messages now enter the pool with `imageDescription` populated — previously they were silently dropped by the `type !== 'chat'` guard
+- `poolMessage()` now sets `body` to `[image]` for image messages with no caption so pool entries are never blank in debug output
+
+#### Changed
+- `poolMessage()` — guard relaxed from `type !== 'chat'` to `type !== 'chat' && type !== 'image'` so image messages are pooled
+- `generateWhatsAppDraft()` on all three LLM clients — conversation text builder now formats image messages as `[Customer] [sent an image]\n[Image description: ...]` instead of a blank line
+- `messageHandler.ts` imports `saveDescription` and `getDescriptions` from `imageCache.ts`
+
+---
+
+## [1.4.0] — 2026-04-01
+
+**Author:** GuiVSR
+
+### Debug mode & LAN access
+
+#### Added
+- **`src/debug.ts`** — centralised debug logging module, enabled via `DEBUG=true` in `.env`:
+  - `debugPrompt(provider, model, systemPrompt, conversationText, maxParts)` — prints the full system prompt and conversation context sent to the LLM, colour-coded by section
+  - `debugResponse(provider, raw, parts)` — prints the raw LLM response and each parsed part
+  - `debugImageAnalysis(provider, model, messageId, mimeType, prompt, description)` — prints the vision prompt and the resulting description
+  - `debugLog(section, content)` — generic debug block for ad-hoc logging
+- `DEBUG=true` / `DEBUG=false` env var — no code changes or special run commands needed; toggling the var and restarting is sufficient
+
+#### Changed
+- `generateWhatsAppDraft()` in `groq.ts`, `gemini.ts`, and `deepseek.ts` — calls `debugPrompt()` before the API request and `debugResponse()` after parsing
+- `analyzeImage()` in `groq.ts` and `gemini.ts` — calls `debugImageAnalysis()` after receiving the vision result
+- **`src/constants.ts`** — `API_BASE_URL` is now dynamic: `window.location.hostname:3000` in the browser so any hostname (localhost or LAN IP) resolves correctly without hardcoding
+- **`webpack.config.js`** — dev server now binds to `host: '0.0.0.0'` so the frontend is reachable from other devices on the network
+- **`src/server.ts`** — `server.listen()` now binds to `'0.0.0.0'` so the backend API and Socket.IO are reachable from LAN; startup log prints both Local and Network URLs
+
+---
+
 ## [1.3.0] — 2026-03-30
 
 **Author:** GuiVSR
@@ -15,13 +98,13 @@ All notable changes to Zapper will be documented here.
 
 #### Changed
 - `getLLMClient()` moved out of `constants.ts` into `src/llm/index.ts` — fixes Webpack bundling errors caused by `node-fetch` and Node.js built-ins (`node:fs`, `node:stream`, etc.) being pulled into the frontend build
-- **`node-fetch` removed** from all LLM clients (`groq.ts`, `deepseek.ts`, `gemini.ts``) and `client.ts` — replaced with the global `fetch` built into Node.js 18+, eliminating the ESM/CJS conflict entirely
-- `GEMINI_DEFAULT_MODEL` updated to `gemini-2.5-flash` (previous values `gemini-2.0-flash` and `gemini-2.5-flash-preview-04-17` are no longer available to new users)
+- **`node-fetch` removed** from all LLM clients (`groq.ts`, `deepseek.ts`, `gemini.ts`) and `client.ts` — replaced with the global `fetch` built into Node.js 18+, eliminating the ESM/CJS conflict entirely
+- `GEMINI_DEFAULT_MODEL` updated to `gemini-2.5-flash`
 - `tsconfig.json` — added `"ignoreDeprecations": "6.0"` to silence the `moduleResolution=node10` deprecation warning in TypeScript 6+
 - **Mark as read on send** — `WhatsAppClient.markChatAsRead()` added; called automatically after every `POST /api/send-message` so read receipts are sent and the unread badge clears instantly
 
 #### Fixed
-- Webpack build errors: `node:fs`, `node:stream`, `node:buffer`, `worker_threads` and related modules failing to resolve — caused by `getLLMClient` being in `constants.ts` which is imported by the frontend
+- Webpack build errors: `node:fs`, `node:stream`, `node:buffer`, `worker_threads` and related modules failing to resolve
 - `TS1479` ESM/CJS conflict on `node-fetch` v3 imports across all LLM files
 - `TS5107` deprecation warning for `moduleResolution=node10` in TypeScript 6
 
@@ -43,16 +126,16 @@ All notable changes to Zapper will be documented here.
 - `markChatAsRead()` public method on `WhatsAppClient` — wraps `chat.sendSeen()` for any chatId
 
 #### Changed
-- `AIDraft.draft: string` replaced by `AIDraft.parts: string[]` — always an array; single-part drafts have length 1, preserving backwards-compatible behaviour when Parts = 1
-- `generateWhatsAppDraft()` on all LLM clients (Groq, DeepSeek, Gemini) now returns `string[]` and accepts a `maxParts` parameter
-- `DEFAULT_MAX_DRAFT_PARTS` in `constants.ts` set to **3** — default for new sessions
-- `getSystemPrompt(maxParts)` now accepts a `maxParts` argument: injects a JSON-array instruction when `> 1`, and an explicit plain-text-only instruction when `= 1` to prevent the model returning accidental JSON
-- `MessageHandler.maxDraftParts` is now a public runtime property updated by both the API and the on-demand generation path, so the auto-pool (10-second silence window) always uses the same value as the UI
-- `POST /api/generate-drafts` no longer mutates `process.env` — `maxDraftParts` is now passed explicitly through the call chain, eliminating a concurrency race condition
+- `AIDraft.draft: string` replaced by `AIDraft.parts: string[]` — always an array; single-part drafts have length 1
+- `generateWhatsAppDraft()` on all LLM clients now returns `string[]` and accepts a `maxParts` parameter
+- `DEFAULT_MAX_DRAFT_PARTS` in `constants.ts` set to **3**
+- `getSystemPrompt(maxParts)` now accepts a `maxParts` argument: injects a JSON-array instruction when `> 1`, and an explicit plain-text-only instruction when `= 1`
+- `MessageHandler.maxDraftParts` is now a public runtime property updated by both the API and the on-demand generation path
+- `POST /api/generate-drafts` no longer mutates `process.env`
 
 #### Fixed
-- Draft banner was displaying raw JSON (e.g. `["Boa tarde!", "..."]`) as a single string instead of parsed parts — `parsePartsResponse` now always attempts JSON parsing regardless of `maxParts`, with four fallback strategies: direct parse → double-encoded string parse → regex bracket extraction → blank-line paragraph split
-- Parts input defaulting to 1 in the UI had no effect on auto-pooled drafts because the pool flush was reading `process.env.MAX_DRAFT_PARTS` (unset) instead of the UI-controlled value
+- Draft banner was displaying raw JSON as a single string instead of parsed parts — `parsePartsResponse` now always attempts JSON parsing with four fallback strategies
+- Parts input defaulting to 1 in the UI had no effect on auto-pooled drafts
 
 ---
 
@@ -63,16 +146,16 @@ All notable changes to Zapper will be documented here.
 ### On-demand AI draft generation & multi-chat selection
 
 #### Added
-- **Manual draft button** (`🤖`) in the input bar — generate an AI draft for the open chat at any time, without waiting for the automatic 10-second pool window
+- **Manual draft button** (`🤖`) in the input bar — generate an AI draft for the open chat at any time; always generates a single-part draft regardless of the Parts setting
 - **Multi-chat selection mode** — toggle with the `☑ Select` button in the sidebar; check multiple chats and generate one draft per chat in a single action
-- **Message limit input** in the sidebar toolbar — controls how many recent messages are sent to the AI for any generation (single or multi); defaults to `HISTORY_CONTEXT` from `constants.ts` and can be overridden per-session in the UI
+- **Message limit input** in the sidebar toolbar — controls how many recent messages are sent to the AI for any generation (single or multi); defaults to `HISTORY_CONTEXT` from `constants.ts`
 - `POST /api/generate-drafts` endpoint — accepts `{ chatIds, limit }` and fires async draft generation; results are delivered via the existing `ai_draft` socket event
-- `generateDraftsForChats()` public method on `MessageHandler` — fetches history and calls Groq for each requested chat
+- `generateDraftsForChats()` public method on `MessageHandler`
 
 #### Changed
-- `HISTORY_CONTEXT` in `constants.ts` is now the single source of truth for the default message limit, used by both the pooling logic and the UI input initial value
-- `SYSTEM_PROMPT` env var added — overrides `DEFAULT_SYSTEM_PROMPT` in `constants.ts` without touching code; all LLM clients read it via `getSystemPrompt()`
-- All project-wide magic values centralised into `src/constants.ts` (API URLs, model names, pool window, limits, colours, favicon size, system prompt)
+- `HISTORY_CONTEXT` in `constants.ts` is now the single source of truth for the default message limit
+- `SYSTEM_PROMPT` env var added — overrides `DEFAULT_SYSTEM_PROMPT` without touching code
+- All project-wide magic values centralised into `src/constants.ts`
 
 ---
 
