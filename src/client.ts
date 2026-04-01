@@ -35,8 +35,8 @@ export interface WhatsAppClientConfig {
 }
 
 export interface MessageHistory {
-    id: string;           // msg.id.id — short hex ID
-    serializedId: string; // msg.id._serialized — full ID needed for media lookup
+    id: string;
+    serializedId: string;
     from: string;
     to: string;
     body: string;
@@ -48,9 +48,11 @@ export interface MessageHistory {
     isForwarded: boolean;
 }
 
-const AUTH_DIR       = '.wwebjs_auth';
-const REINIT_DELAY   = 3_000;  // ms to wait before reinitialising after a crash
-const MAX_REINIT     = 5;      // maximum consecutive reinit attempts before giving up
+const AUTH_DIR      = '.wwebjs_auth';
+const TMP_DIR       = path.resolve('tmp');
+const STICKERS_DIR  = path.join(TMP_DIR, 'stickers');
+const REINIT_DELAY  = 3_000;
+const MAX_REINIT    = 5;
 
 export class WhatsAppClient {
     private client!: Client;
@@ -60,9 +62,13 @@ export class WhatsAppClient {
     private reinitAttempts: number = 0;
 
     constructor(config: WhatsAppClientConfig = {}) {
-        this.config = { headless: true, stickersDir: './stickers', ...config };
+        this.config = { headless: true, stickersDir: STICKERS_DIR, ...config };
         this.stickersDir = this.config.stickersDir!;
 
+        // Ensure tmp/ and tmp/stickers/ exist
+        if (!fs.existsSync(TMP_DIR)) {
+            fs.mkdirSync(TMP_DIR, { recursive: true });
+        }
         if (!fs.existsSync(this.stickersDir)) {
             fs.mkdirSync(this.stickersDir, { recursive: true });
         }
@@ -168,7 +174,7 @@ export class WhatsAppClient {
 
         setTimeout(async () => {
             try {
-                await this.client.destroy().catch(() => {/* ignore destroy errors */});
+                await this.client.destroy().catch(() => {});
             } catch { /* ignore */ }
 
             this.buildClient();
@@ -297,10 +303,6 @@ export class WhatsAppClient {
         return chat.sendMessage(message);
     }
 
-    /**
-     * Mark all messages in a chat as read (equivalent to opening the chat on your phone).
-     * Fire-and-forget — errors are non-fatal.
-     */
     public async markChatAsRead(chatId: string): Promise<void> {
         if (!this.isInitialized) return;
 

@@ -1,7 +1,8 @@
 import { Message } from 'whatsapp-web.js';
-import { WhatsAppClient } from '../client';
+import { WhatsAppClient, MessageHistory } from '../client';
 import { getLLMClient } from '../llm';
 import { transcribeAudio } from '../transcription/deepgram';
+import { saveDescription, getDescriptions } from '../llm/imageCache';
 import chalk from 'chalk';
 import {
     POOL_WINDOW_MS,
@@ -9,7 +10,6 @@ import {
     DEFAULT_SIDEBAR_CHATS,
     getMaxDraftParts,
 } from '../constants';
-import { getDescriptions, saveDescription } from '../llm/imageCache';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,6 +55,61 @@ export class MessageHandler {
         this.onTranscription = onTranscription;
     }
 
+    // ── Enrich history: fill missing image descriptions ───────────────────────
+
+    /**
+     * Takes a list of history messages, looks up cached descriptions, and for
+     * any image message still missing a description it downloads + analyses the
+     * image on the spot.  Returns the fully-enriched list.
+     */
+    private async enrichWithDescriptions(messages: MessageHistory[]): Promise<PooledMessage[]> {
+        const descMap = getDescriptions(messages.map(m => m.id));
+
+        const enriched: PooledMessage[] = [];
+
+        for (const m of messages) {
+            const body = m.type === 'image'
+                ? (m.body?.trim() || '[image]')
+                : (m.body || '');
+
+            let imageDescription: string | undefined = descMap[m.id];
+
+            // If this is an image and we don't have a description yet — fetch one now
+            if (m.type === 'image' && m.hasMedia && !imageDescription) {
+                try {
+                    console.log(chalk.blue(`[Vision] No cached description for image ${m.id} — analysing now…`));
+                    const media = await this.client.getMessageMedia(m.serializedId);
+                    if (media) {
+                        const llm = getLLMClient();
+                        imageDescription = await llm.analyzeImage(media.data, media.mimetype, undefined, m.id);
+                        saveDescription(m.id, imageDescription);
+                        console.log(chalk.green(`[Vision] ✅ Description cached for ${m.id} (${imageDescription.length} chars)`));
+                    } else {
+                        console.warn(chalk.yellow(`[Vision] Could not download media for ${m.id}`));
+                        imageDescription = '[Image could not be downloaded]';
+                    }
+                } catch (err: any) {
+                    console.error(chalk.red(`[Vision] ❌ Failed to analyse image ${m.id}: ${err?.message ?? err}`));
+                    imageDescription = '[Image analysis failed]';
+                }
+            }
+
+            enriched.push({
+                id:    m.id,
+                from:  m.from,
+                to:    m.to,
+                body,
+                timestamp: m.timestamp,
+                type:  m.type,
+                fromMe: m.fromMe,
+                hasMedia: m.hasMedia,
+                imageDescription,
+            });
+        }
+
+        return enriched;
+    }
+
     // ── Public entry point ────────────────────────────────────────────────────
 
     public async handleMessage(message: Message): Promise<void> {
@@ -75,6 +130,7 @@ export class MessageHandler {
         console.log(chalk.yellow(`${sender}`));
         console.log(chalk.green(`From: ${message.from}`));
         console.log(chalk.gray(`ID: ${message.id.id}`));
+        console.log(chalk.gray(`Type: ${message.type}`));
 
         switch (message.type) {
             case 'chat':
@@ -113,21 +169,6 @@ export class MessageHandler {
                 console.log(chalk.white(`${message.type}: ${message.body || 'No content'}`));
         }
 
-        if (message.hasMedia) {
-            console.log(chalk.gray(`📎 Has media attachment`));
-            if (message.type !== 'image') {
-                try {
-                    const media = await message.downloadMedia();
-                    if (media) {
-                        console.log(chalk.gray(`   MIME type: ${media.mimetype}`));
-                        console.log(chalk.gray(`   Size: ${(media.data.length / 1024).toFixed(2)} KB`));
-                    }
-                } catch {
-                    console.log(chalk.gray(`   Could not get media info`));
-                }
-            }
-        }
-
         console.log('═'.repeat(60) + '\n');
 
         // Commands bypass pooling
@@ -154,6 +195,7 @@ export class MessageHandler {
                 console.error(chalk.red('[Vision] Image analysis failed:'), err);
                 this.poolMessage(message, undefined, '[Image analysis failed]');
             }
+            await this.handleInboundImage(message);
         } else {
             this.poolMessage(message);
         }
@@ -164,12 +206,62 @@ export class MessageHandler {
         }
     }
 
+    // ── Live image handling ───────────────────────────────────────────────────
+
+    private async handleInboundImage(message: Message): Promise<void> {
+        console.log(chalk.blue(`[Vision] Image received — ID: ${message.id.id}`));
+
+        try {
+            console.log(chalk.blue(`[Vision] Downloading media…`));
+            const media = await message.downloadMedia();
+
+            if (!media) {
+                console.error(chalk.red(`[Vision] downloadMedia() returned null for ${message.id.id}`));
+                this.poolMessage(message, '[Image could not be downloaded]');
+                return;
+            }
+
+            console.log(chalk.blue(`[Vision] Downloaded — mime: ${media.mimetype}, size: ${(media.data.length / 1024).toFixed(1)} KB`));
+            console.log(chalk.blue(`[Vision] Sending to vision model…`));
+
+            const llm         = getLLMClient();
+            const description = await llm.analyzeImage(media.data, media.mimetype, undefined, message.id.id);
+
+            console.log(chalk.green(`[Vision] ✅ Description received (${description.length} chars)`));
+            console.log(chalk.green(`[Vision] Preview: ${description.slice(0, 150)}…`));
+
+            saveDescription(message.id.id, description);
+            this.poolMessage(message, description);
+
+        } catch (err: any) {
+            console.error(chalk.red(`[Vision] ❌ Image analysis FAILED for ${message.id.id}:`));
+            console.error(chalk.red(`[Vision] Error: ${err?.message ?? err}`));
+            console.error(err);
+            this.poolMessage(message, '[Image received — analysis failed]');
+        }
+    }
+
     // ── Pooling ───────────────────────────────────────────────────────────────
 
     private poolMessage(message: Message, overrideBody?: string, imageDescription?: string): void {
         if (message.fromMe) return;
 
-        const body = overrideBody ?? message.body;
+        var body
+
+        switch (message.type) {
+            case 'chat':
+            case 'image':
+                body = message.body?.trim() || '[image]';
+                break;
+            case 'audio':
+                body = overrideBody ?? message.body;
+            case 'ptt':
+                break; // allowed types
+            default:
+                body = message.body || '';
+                return; // ignore other types
+        }
+
 
         // Accept text, image, and transcribed audio/ptt
         if (message.type !== 'chat' && message.type !== 'image' && !overrideBody) return;
@@ -180,6 +272,7 @@ export class MessageHandler {
         if (!this.pools.has(chatId)) {
             this.pools.set(chatId, []);
         }
+
 
         this.pools.get(chatId)!.push({
             id:               message.id.id,
@@ -203,7 +296,8 @@ export class MessageHandler {
         console.log(
             chalk.blue(
                 `[Pooler] ${chatId} — pool size: ${this.pools.get(chatId)!.length}, ` +
-                `timer reset to ${POOL_WINDOW_MS / 1000}s`
+                `timer reset to ${POOL_WINDOW_MS / 1000}s` +
+                (imageDescription ? chalk.green(` [+vision desc ${imageDescription.length}c]`) : '')
             )
         );
     }
@@ -251,17 +345,13 @@ export class MessageHandler {
                 const pooledIds = new Set(pooledMessages.map(m => m.id));
                 const priorMsgs = history.filter(m => !pooledIds.has(m.id)).slice(-HISTORY_CONTEXT);
 
-                // Attach any cached image descriptions to prior history messages
-                const descMap   = getDescriptions(priorMsgs.map(m => m.id));
-                enrichedHistory = priorMsgs.map(m => ({
-                    ...m,
-                    imageDescription: descMap[m.id],
-                }));
+                // Enrich — analyses any image in history that has no cached description
+                enrichedHistory = await this.enrichWithDescriptions(priorMsgs);
             } catch {
                 console.warn(chalk.yellow(`[Pooler] Could not fetch history for ${chatId}, proceeding without context`));
             }
 
-            // pooledMessages already carry live descriptions from handleMessage
+            // pooledMessages already carry live descriptions from handleInboundImage
             const fullContext = [...enrichedHistory, ...pooledMessages];
             const maxParts    = this.maxDraftParts;
 
@@ -293,12 +383,8 @@ export class MessageHandler {
                 const history = await this.client.getChatHistory(chatId, limit);
                 if (history.length === 0) continue;
 
-                // Attach cached image descriptions to history messages
-                const descMap         = getDescriptions(history.map(m => m.id));
-                const enrichedHistory = history.map(m => ({
-                    ...m,
-                    imageDescription: descMap[m.id],
-                }));
+                // Enrich — analyses any image in history that has no cached description
+                const enrichedHistory = await this.enrichWithDescriptions(history);
 
                 const llm   = getLLMClient();
                 const parts = await llm.generateWhatsAppDraft(enrichedHistory, resolvedMaxParts);
