@@ -1,6 +1,7 @@
 import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient, MessageHistory } from '../client';
 import { getLLMClient } from '../llm';
+import { transcribeAudio } from '../transcription/deepgram';
 import { saveDescription, getDescriptions } from '../llm/imageCache';
 import chalk from 'chalk';
 import {
@@ -32,6 +33,7 @@ export interface AIDraft {
 }
 
 export type DraftCallback = (draft: AIDraft) => void;
+export type TranscriptionCallback = (data: { messageId: string; chatId: string; transcript: string }) => void;
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
@@ -39,24 +41,26 @@ export class MessageHandler {
     private client: WhatsAppClient;
     private webhookUrl?: string;
     private onDraft?: DraftCallback;
+    private onTranscription?: TranscriptionCallback;
 
     public maxDraftParts: number = getMaxDraftParts();
 
     private pools  = new Map<string, PooledMessage[]>();
     private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-    constructor(client: WhatsAppClient, webhookUrl?: string, onDraft?: DraftCallback) {
-        this.client     = client;
-        this.webhookUrl = webhookUrl;
-        this.onDraft    = onDraft;
+    constructor(client: WhatsAppClient, webhookUrl?: string, onDraft?: DraftCallback, onTranscription?: TranscriptionCallback) {
+        this.client          = client;
+        this.webhookUrl      = webhookUrl;
+        this.onDraft         = onDraft;
+        this.onTranscription = onTranscription;
     }
 
-    // ── Enrich history: fill missing image descriptions ───────────────────────
+    // ── Enrich history: fill missing image descriptions & audio transcriptions ─
 
     /**
      * Takes a list of history messages, looks up cached descriptions, and for
-     * any image message still missing a description it downloads + analyses the
-     * image on the spot.  Returns the fully-enriched list.
+     * any image or audio message still missing a description it downloads +
+     * analyses/transcribes on the spot.  Returns the fully-enriched list.
      */
     private async enrichWithDescriptions(messages: MessageHistory[]): Promise<PooledMessage[]> {
         const descMap = getDescriptions(messages.map(m => m.id));
@@ -64,9 +68,19 @@ export class MessageHandler {
         const enriched: PooledMessage[] = [];
 
         for (const m of messages) {
-            const body = m.type === 'image'
-                ? (m.body?.trim() || '[image]')
-                : (m.body || '');
+            let body: string;
+            switch (m.type) {
+                case 'image':
+                    body = m.body?.trim() || '[image]';
+                    break;
+                case 'audio':
+                case 'ptt':
+                    body = m.body || '';
+                    break;
+                default:
+                    body = m.body || '';
+                    break;
+            }
 
             let imageDescription: string | undefined = descMap[m.id];
 
@@ -87,6 +101,32 @@ export class MessageHandler {
                 } catch (err: any) {
                     console.error(chalk.red(`[Vision] ❌ Failed to analyse image ${m.id}: ${err?.message ?? err}`));
                     imageDescription = '[Image analysis failed]';
+                }
+            }
+
+            // If this is audio/ptt and we don't have a transcription yet — transcribe now
+            if ((m.type === 'audio' || m.type === 'ptt') && m.hasMedia && !imageDescription) {
+                try {
+                    console.log(chalk.blue(`[Transcription] No cached transcription for ${m.type} ${m.id} — transcribing now…`));
+                    const media = await this.client.getMessageMedia(m.serializedId);
+                    if (media) {
+                        const audioBuffer = Buffer.from(media.data, 'base64');
+                        const transcript = await transcribeAudio(audioBuffer, media.mimetype);
+                        if (transcript) {
+                            imageDescription = transcript;
+                            saveDescription(m.id, transcript);
+                            console.log(chalk.green(`[Transcription] ✅ Transcription cached for ${m.id} (${transcript.length} chars)`));
+                        } else {
+                            console.warn(chalk.yellow(`[Transcription] Empty transcript for ${m.id}`));
+                            imageDescription = '[Audio could not be transcribed]';
+                        }
+                    } else {
+                        console.warn(chalk.yellow(`[Transcription] Could not download media for ${m.id}`));
+                        imageDescription = '[Audio could not be downloaded]';
+                    }
+                } catch (err: any) {
+                    console.error(chalk.red(`[Transcription] ❌ Failed to transcribe ${m.id}: ${err?.message ?? err}`));
+                    imageDescription = '[Audio transcription failed]';
                 }
             }
 
@@ -141,7 +181,10 @@ export class MessageHandler {
                 if (message.body) console.log(chalk.white(`Caption: ${message.body}`));
                 break;
             case 'audio':
+            case 'ptt':
                 console.log(chalk.magenta(`🎵 Audio received`));
+                // Transcription + pooling handled below — NOT here, to avoid
+                // pooling before we know whether the image branch also applies.
                 break;
             case 'document':
                 console.log(chalk.magenta(`📄 Document received`));
@@ -173,7 +216,27 @@ export class MessageHandler {
 
         // ── Pool inbound messages ─────────────────────────────────────────────
         if (!message.fromMe && message.type === 'image') {
+            try {
+                console.log(chalk.blue(`[Vision] Analyzing image from ${message.from}…`));
+                const media = await message.downloadMedia();
+                if (media) {
+                    const llm         = getLLMClient();
+                    const description = await llm.analyzeImage(media.data, media.mimetype, message.id.id);
+                    saveDescription(message.id.id, description); // persist to disk
+                    console.log(chalk.blue(`[Vision] Description (preview): ${description.slice(0, 120)}…`));
+                    this.poolMessage(message, undefined, description);
+                } else {
+                    this.poolMessage(message, undefined, '[Image could not be downloaded]');
+                }
+            } catch (err) {
+                console.error(chalk.red('[Vision] Image analysis failed:'), err);
+                this.poolMessage(message, undefined, '[Image analysis failed]');
+            }
             await this.handleInboundImage(message);
+        } else if (!message.fromMe && (message.type === 'audio' || message.type === 'ptt')) {
+            // Audio/ptt: transcribe then pool — handleAudioTranscription does both.
+            // We do NOT call poolMessage separately to avoid double-pooling.
+            await this.handleAudioTranscription(message);
         } else {
             this.poolMessage(message);
         }
@@ -221,10 +284,29 @@ export class MessageHandler {
 
     // ── Pooling ───────────────────────────────────────────────────────────────
 
-    private poolMessage(message: Message, imageDescription?: string): void {
+    private poolMessage(message: Message, overrideBody?: string, imageDescription?: string): void {
         if (message.fromMe) return;
-        if (message.type !== 'chat' && message.type !== 'image') return;
-        if (message.type === 'chat' && !message.body?.trim()) return;
+
+        let body: string | undefined;
+
+        switch (message.type) {
+            case 'chat':
+                body = message.body?.trim() || '';
+                break;
+            case 'image':
+                body = message.body?.trim() || '[image]';
+                break;
+            case 'audio':
+            case 'ptt':
+                body = overrideBody ?? message.body ?? '';
+                break;
+            default:
+                return; // ignore other types
+        }
+
+        // Accept text, image, and transcribed audio/ptt
+        if (message.type !== 'chat' && message.type !== 'image' && !overrideBody) return;
+        if (!body?.trim() && !imageDescription) return;
 
         const chatId: string = message.from;
 
@@ -232,15 +314,11 @@ export class MessageHandler {
             this.pools.set(chatId, []);
         }
 
-        const body = message.type === 'image'
-            ? (message.body?.trim() || '[image]')
-            : (message.body || '');
-
         this.pools.get(chatId)!.push({
             id:               message.id.id,
             from:             message.from,
             to:               message.to,
-            body,
+            body:             body || '',
             timestamp:        message.timestamp,
             type:             message.type,
             fromMe:           message.fromMe,
@@ -264,6 +342,40 @@ export class MessageHandler {
         );
     }
 
+    private async handleAudioTranscription(message: Message): Promise<void> {
+        if (message.fromMe) return;
+        if (!message.hasMedia) return;
+
+        try {
+            const media = await message.downloadMedia();
+            if (!media) {
+                console.warn(chalk.yellow('[Transcription] Could not download audio media'));
+                return;
+            }
+
+            const audioBuffer = Buffer.from(media.data, 'base64');
+            const transcript = await transcribeAudio(audioBuffer, media.mimetype);
+
+            if (!transcript) {
+                console.warn(chalk.yellow(`[Transcription] No transcript returned for ${message.id.id}`));
+                return;
+            }
+
+            // Persist to the description cache so history enrichment finds it later
+            saveDescription(message.id.id, transcript);
+            console.log(chalk.green(`[Transcription] ✅ Saved to cache: ${message.id.id} (${transcript.length} chars)`));
+
+            // Emit transcription to the frontend
+            this.onTranscription?.({ messageId: message.id.id, chatId: message.from, transcript });
+
+            // Pool the transcript so it feeds into the AI draft
+            const label = message.type === 'ptt' ? 'Voice message' : 'Audio';
+            this.poolMessage(message, `[${label} transcription]: ${transcript}`);
+        } catch (err) {
+            console.error(chalk.red('[Transcription] Failed to transcribe audio:'), err);
+        }
+    }
+
     private async flushPool(chatId: string): Promise<void> {
         const pooledMessages = this.pools.get(chatId) ?? [];
         this.pools.delete(chatId);
@@ -280,13 +392,15 @@ export class MessageHandler {
                 const pooledIds = new Set(pooledMessages.map(m => m.id));
                 const priorMsgs = history.filter(m => !pooledIds.has(m.id)).slice(-HISTORY_CONTEXT);
 
-                // Enrich — analyses any image in history that has no cached description
+                // Enrich — analyses any image and transcribes any audio in history
+                // that has no cached description
                 enrichedHistory = await this.enrichWithDescriptions(priorMsgs);
             } catch {
                 console.warn(chalk.yellow(`[Pooler] Could not fetch history for ${chatId}, proceeding without context`));
             }
 
             // pooledMessages already carry live descriptions from handleInboundImage
+            // and live transcriptions from handleAudioTranscription
             const fullContext = [...enrichedHistory, ...pooledMessages];
             const maxParts    = this.maxDraftParts;
 
@@ -318,7 +432,8 @@ export class MessageHandler {
                 const history = await this.client.getChatHistory(chatId, limit);
                 if (history.length === 0) continue;
 
-                // Enrich — analyses any image in history that has no cached description
+                // Enrich — analyses any image and transcribes any audio in history
+                // that has no cached description
                 const enrichedHistory = await this.enrichWithDescriptions(history);
 
                 const llm   = getLLMClient();

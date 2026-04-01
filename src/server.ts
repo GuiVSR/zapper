@@ -88,6 +88,10 @@ const messageHandler = new MessageHandler(
     (draft) => {
         console.log(`[Server] Emitting ai_draft for chat ${draft.chatId} (${draft.parts.length} part(s))`);
         io.emit('ai_draft', draft);
+    },
+    (data) => {
+        console.log(`[Server] Emitting transcription for message ${data.messageId}`);
+        io.emit('transcription', data);
     }
 );
 

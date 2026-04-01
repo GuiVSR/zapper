@@ -8,6 +8,7 @@ A WhatsApp web client with AI-powered reply drafting. Messages from each custome
 
 - 💬 WhatsApp Web interface in the browser
 - 🤖 Automatic AI draft generation per conversation
+- 🎙️ Audio/voice message transcription via Deepgram — transcribed text is used as context for AI draft generation
 - ✅ One-click send, or edit before sending
 - 🔔 Browser tab badge showing number of pending drafts
 - 📜 Chat history with the last 10 messages included as context for the AI
@@ -19,6 +20,7 @@ A WhatsApp web client with AI-powered reply drafting. Messages from each custome
 - Node.js 18+
 - A WhatsApp account (personal or business)
 - A [Groq](https://console.groq.com) API key (free)
+- A [Deepgram](https://console.deepgram.com) API key (optional — for audio transcription)
 
 ---
 
@@ -34,37 +36,13 @@ npm install
 
 ## Environment variables
 
-Create a `.env` file in the project root:
+Copy the example and fill in your keys:
 
-```dotenv
-# ── Groq (default LLM — free at console.groq.com) ────────────────────────────
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GROQ_MODEL=llama-3.3-70b-versatile
-GROQ_MAX_TOKENS=250
-GROQ_TEMPERATURE=0.7
-
-# ── AI system prompt ──────────────────────────────────────────────────────────
-# Optional. If set, overrides the default prompt in src/constants.ts.
-# Use this to describe your business, tone, language, and any rules.
-# SYSTEM_PROMPT=You are a support agent for Acme Ltd. Always reply in Portuguese, be concise and friendly.
-
-# ── Optional: webhook URL to forward inbound messages to ──────────────────────
-# WEBHOOK_URL=https://your-endpoint.com/webhook
-
-# ── Optional: server port (default: 3000) ─────────────────────────────────────
-# PORT=3000
-
-# ── Optional: alternative LLMs (swap import in messageHandler.ts to use) ─────
-# DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# DEEPSEEK_MODEL=deepseek-chat
-# DEEPSEEK_MAX_TOKENS=250
-# DEEPSEEK_TEMPERATURE=0.7
-
-# GEMINI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# GEMINI_MODEL=gemini-2.0-flash
-# GEMINI_MAX_TOKENS=250
-# GEMINI_TEMPERATURE=0.7
+```bash
+cp .env.example .env
 ```
+
+At minimum you need a Groq API key. For audio transcription, add a Deepgram API key too. See `.env.example` for all available options.
 
 ### Available Groq models
 
@@ -120,6 +98,17 @@ Your session is saved locally in `.wwebjs_auth/` so you only need to scan once. 
    - **✕ Discard** — dismisses the draft
 5. The browser tab icon shows the number of pending drafts across all chats
 
+### Audio transcription
+
+When a customer sends a voice message (or audio file), Zapper automatically:
+
+1. Downloads the audio from WhatsApp
+2. Sends it to Deepgram for transcription (model: `nova-2`, with automatic language detection)
+3. Pools the transcript as `[Voice message transcription]: ...` alongside any text messages
+4. The AI generates a draft reply that takes the audio content into account
+
+To enable this, set `DEEPGRAM_API_KEY` in your `.env`. Without the key, audio messages are still received and logged but not transcribed.
+
 ### Customising the AI prompt
 
 Set `SYSTEM_PROMPT` in your `.env` file — no code changes needed. If `SYSTEM_PROMPT` is not set, the fallback defined in `src/constants.ts` (`DEFAULT_SYSTEM_PROMPT`) is used instead.
@@ -135,6 +124,8 @@ zapper/
 │   ├── client.ts              # WhatsApp Web client wrapper
 │   ├── handlers/
 │   │   └── messageHandler.ts  # Message logging, pooling, AI draft trigger
+│   ├── transcription/
+│   │   └── deepgram.ts        # Deepgram audio transcription client
 │   ├── llm/
 │   │   ├── groq.ts            # Groq client (active)
 │   │   ├── deepseek.ts        # DeepSeek client (alternative)
@@ -156,18 +147,11 @@ zapper/
 
 ## Switching LLM provider
 
-Each provider has its own file in `src/llm/`. To switch, change one line in `src/handlers/messageHandler.ts`:
+Set `LLM_PROVIDER` in your `.env` — no code changes needed:
 
-```ts
-// Change this import:
-import { getGroqClient } from '../llm/groq';
-
-// To any of these:
-import { getDeepSeekClient } from '../llm/deepseek';
-import { getGeminiClient }   from '../llm/gemini';
+```dotenv
+LLM_PROVIDER=groq      # or gemini, deepseek
 ```
-
-And update the call inside `flushPool` accordingly.
 
 ---
 

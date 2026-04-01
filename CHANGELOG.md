@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.8.0] — 2026-04-01
+
+**Author:** Putzeys
+
+### Audio transcription via Deepgram
+
+#### Added
+- **Audio/voice message transcription** — incoming audio (`audio`) and voice messages (`ptt`) are automatically transcribed using the Deepgram REST API (model: `nova-2`, with automatic language detection and smart formatting)
+- **`src/transcription/deepgram.ts`** — lightweight Deepgram client using native `fetch`; sends raw audio bytes and returns the transcript
+- **`DEEPGRAM_API_KEY` env var** — set this to enable transcription; without it, audio messages are received but not transcribed (graceful degradation)
+- **`DEEPGRAM_BASE_URL` and `DEEPGRAM_MODEL` constants** in `constants.ts`
+- **`.env.example`** — template with all available environment variables documented
+
+---
+
+#### Changed
+- `messageHandler.ts` — `poolMessage()` now accepts an optional `overrideBody` parameter so transcribed audio can be pooled as context for AI draft generation
+- `messageHandler.ts` — audio/ptt messages now trigger `handleAudioTranscription()` which downloads media, transcribes via Deepgram, and pools the result as `[Voice message transcription]: ...`
+- `README.md` — updated with audio transcription docs, `.env.example` reference, corrected LLM switching instructions, and updated project structure
+
 All notable changes to Zapper will be documented here.
 
 ## [1.7.0] — 2026-04-01

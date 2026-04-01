@@ -150,23 +150,13 @@ class GroqClient {
     }
 
     async generateWhatsAppDraft(
-        messages: Array<{ body: string; fromMe: boolean; timestamp: number; imageDescription?: string }>,
+        messages: Array<{ body: string; fromMe: boolean; timestamp: number; type?: string; imageDescription?: string }>,
         maxParts: number = getMaxDraftParts()
     ): Promise<string[]> {
         const systemPrompt = getSystemPrompt(maxParts);
         const activeModel  = process.env.GROQ_MODEL ?? this.model;
 
-        const conversationText = messages
-            .map(m => {
-                const speaker = m.fromMe ? '[You]' : '[Customer]';
-                const body    = m.body?.trim() || '';
-                const imgDesc = m.imageDescription;
-                if (imgDesc) {
-                    return `${speaker} [sent an image${body ? ` with caption: "${body}"` : ''}]\n[Image description: ${imgDesc}]`;
-                }
-                return `${speaker} ${body}`;
-            })
-            .join('\n');
+        const conversationText = buildConversationText(messages);
 
         debugPrompt('Groq', activeModel, systemPrompt, conversationText, maxParts);
 
@@ -188,6 +178,41 @@ class GroqClient {
         debugResponse('Groq', raw, parts);
         return parts;
     }
+}
+
+// ─── Shared conversation text builder ─────────────────────────────────────────
+
+export function buildConversationText(
+    messages: Array<{ body: string; fromMe: boolean; timestamp: number; type?: string; imageDescription?: string }>
+): string {
+    return messages
+        .map(m => {
+            const speaker = m.fromMe ? '[You]' : '[Customer]';
+            const body    = m.body?.trim() || '';
+            const desc    = m.imageDescription;
+            const type    = m.type ?? 'chat';
+
+            // Audio / voice messages
+            if (type === 'audio' || type === 'ptt') {
+                const label = type === 'ptt' ? 'voice message' : 'audio message';
+                if (desc) {
+                    return `${speaker} [sent a ${label}]\n[Transcription: ${desc}]`;
+                }
+                if (body) {
+                    // Body may already contain the transcription from poolMessage
+                    return `${speaker} ${body}`;
+                }
+                return `${speaker} [sent a ${label} — not transcribed]`;
+            }
+
+            // Images
+            if (desc) {
+                return `${speaker} [sent an image${body && body !== '[image]' ? ` with caption: "${body}"` : ''}]\n[Image description: ${desc}]`;
+            }
+
+            return `${speaker} ${body}`;
+        })
+        .join('\n');
 }
 
 // ─── Shared parser ────────────────────────────────────────────────────────────
