@@ -7,7 +7,7 @@ import {
     getMaxDraftParts,
     IMAGE_ANALYSIS_PROMPT,
 } from '../constants';
-import { parsePartsResponse } from './groq';
+import { parsePartsResponse, buildConversationText } from './groq';
 import { debugPrompt, debugResponse, debugImageAnalysis } from '../debug';
 
 interface GeminiPart {
@@ -149,23 +149,13 @@ class GeminiClient {
     }
 
     async generateWhatsAppDraft(
-        messages: Array<{ body: string; fromMe: boolean; timestamp: number; imageDescription?: string }>,
+        messages: Array<{ body: string; fromMe: boolean; timestamp: number; type?: string; imageDescription?: string }>,
         maxParts: number = getMaxDraftParts()
     ): Promise<string[]> {
         const systemPrompt = getSystemPrompt(maxParts);
         const activeModel  = process.env.GEMINI_MODEL ?? this.model;
 
-        const conversationText = messages
-            .map(m => {
-                const speaker = m.fromMe ? '[You]' : '[Customer]';
-                const body    = m.body?.trim() || '';
-                const imgDesc = m.imageDescription;
-                if (imgDesc) {
-                    return `${speaker} [sent an image${body ? ` with caption: "${body}"` : ''}]\n[Image description: ${imgDesc}]`;
-                }
-                return `${speaker} ${body}`;
-            })
-            .join('\n');
+        const conversationText = buildConversationText(messages);
 
         debugPrompt('Gemini', activeModel, systemPrompt, conversationText, maxParts);
 
