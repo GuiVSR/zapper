@@ -30,14 +30,14 @@ const whatsappClient = new WhatsAppClient({
     },
     onMessage: async (message) => {
         io.emit('message', {
-            id:       message.id.id,
-            from:     message.from,
-            to:       message.to,
-            body:     message.body,
+            id:        message.id.id,
+            from:      message.from,
+            to:        message.to,
+            body:      message.body,
             timestamp: message.timestamp,
-            type:     message.type,
-            fromMe:   message.fromMe,
-            hasMedia: message.hasMedia,
+            type:      message.type,
+            fromMe:    message.fromMe,
+            hasMedia:  message.hasMedia,
         });
 
         await messageHandler.handleMessage(message);
@@ -59,12 +59,12 @@ const whatsappClient = new WhatsAppClient({
     onSticker: (stickerInfo) => {
         console.log(`🎨 Sticker received from ${stickerInfo.message.from}`);
         io.emit('sticker', {
-            from: stickerInfo.message.from,
+            from:       stickerInfo.message.from,
             isAnimated: stickerInfo.isAnimated,
-            fileSize: stickerInfo.fileSize,
+            fileSize:   stickerInfo.fileSize,
             dimensions: stickerInfo.dimensions,
-            data: stickerInfo.data.toString('base64'),
-            savedPath: stickerInfo.savedPath,
+            data:       stickerInfo.data.toString('base64'),
+            savedPath:  stickerInfo.savedPath,
         });
     },
     onAuthFailure: (msg) => {
@@ -121,11 +121,11 @@ app.get('/api/chats', async (_req, res) => {
         const chats = await whatsappClient.getChats();
         res.json(
             chats.map(chat => ({
-                id: chat.id._serialized,
-                name: chat.name || chat.id.user || 'Unknown',
-                isGroup: chat.isGroup,
+                id:          chat.id._serialized,
+                name:        chat.name || chat.id.user || 'Unknown',
+                isGroup:     chat.isGroup,
                 unreadCount: chat.unreadCount,
-                timestamp: chat.timestamp,
+                timestamp:   chat.timestamp,
             }))
         );
     } catch (err: any) {
@@ -141,7 +141,7 @@ app.get('/api/history/:chatId', async (req, res) => {
         const { chatId } = req.params;
         const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
         const history = await whatsappClient.getChatHistory(chatId, limit);
-        const sorted = [...history].sort((a, b) => a.timestamp - b.timestamp);
+        const sorted  = [...history].sort((a, b) => a.timestamp - b.timestamp);
         res.json({ chatId, count: sorted.length, messages: sorted });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chat history', details: err.message });
@@ -168,7 +168,7 @@ app.get('/api/chats-with-messages', async (req, res) => {
         const formatted = Array.from(chatsWithMessages.entries()).map(([chatId, messages]) => ({
             chatId,
             messageCount: messages.length,
-            messages: messages.slice(0, 10),
+            messages:     messages.slice(0, 10),
         }));
         res.json({ count: formatted.length, chats: formatted });
     } catch (err: any) {
@@ -200,7 +200,6 @@ app.post('/api/send-message', async (req, res) => {
     if (!to || !message) return res.status(400).json({ error: 'Missing "to" or "message" field' });
     try {
         const result = await whatsappClient.sendMessage(to, message);
-        // Mark all messages in the chat as read
         whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
         res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
     } catch (err: any) {
@@ -230,7 +229,6 @@ app.post('/api/logout', async (_req, res) => {
     }
 });
 
-// Update runtime settings (e.g. maxDraftParts) without triggering a generation
 app.post('/api/settings', (req, res) => {
     const { maxDraftParts } = req.body;
     if (typeof maxDraftParts === 'number' && maxDraftParts >= 1) {
@@ -240,15 +238,13 @@ app.post('/api/settings', (req, res) => {
     res.json({ maxDraftParts: messageHandler.maxDraftParts });
 });
 
-// Generate AI draft on demand for one or more chats
-// Body: { chatIds: string[], limit?: number, maxDraftParts?: number }
 app.post('/api/generate-drafts', async (req, res) => {
     const { chatIds, limit, maxDraftParts } = req.body;
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     if (!Array.isArray(chatIds) || chatIds.length === 0) return res.status(400).json({ error: 'Missing or empty "chatIds" array' });
 
-    const messageLimit  = typeof limit         === 'number' && limit         > 0  ? limit         : 10;
-    const partsLimit    = typeof maxDraftParts  === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
+    const messageLimit = typeof limit         === 'number' && limit         > 0  ? limit         : 10;
+    const partsLimit   = typeof maxDraftParts  === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
 
     messageHandler.generateDraftsForChats(chatIds, messageLimit, partsLimit)
         .catch(err => console.error('[Server] generate-drafts error:', err));
@@ -283,9 +279,9 @@ io.on('connection', (socket) => {
         if (!whatsappClient.isReady()) return socket.emit('error', { message: 'WhatsApp client not ready' });
         const chats = await whatsappClient.getChats();
         socket.emit('chats_list', chats.map(c => ({
-            id: c.id._serialized,
-            name: c.name,
-            isGroup: c.isGroup,
+            id:          c.id._serialized,
+            name:        c.name,
+            isGroup:     c.isGroup,
             unreadCount: c.unreadCount,
         })));
     });
@@ -315,10 +311,12 @@ io.on('connection', (socket) => {
     });
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+// ── Start — bind to all interfaces so LAN access works ───────────────────────
 const PORT = SERVER_PORT;
-server.listen(PORT, () => {
-    console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
+    console.log(`   Local:   http://localhost:${PORT}`);
+    console.log(`   Network: http://<your-ip>:${PORT}`);
     console.log(`\n📱 API endpoints:`);
     console.log(`   GET  /api/test`);
     console.log(`   GET  /api/status`);

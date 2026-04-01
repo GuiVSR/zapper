@@ -32,6 +32,7 @@ module.exports = {
     ],
     devServer: {
         client: { overlay: false },
+        host: '0.0.0.0',
         static: {
             directory: path.join(__dirname, 'dist/public'),
         },
@@ -39,7 +40,7 @@ module.exports = {
         hot: true,
         proxy: [
             {
-                context: ['/socket.io', '/api'],  // Add '/api' to the proxy context
+                context: ['/socket.io', '/api'],
                 target: 'http://localhost:3000',
                 ws: true,
                 changeOrigin: true,

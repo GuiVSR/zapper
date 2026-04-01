@@ -6,7 +6,11 @@
 export const SERVER_PORT         = 3000;
 
 // ── Frontend ──────────────────────────────────────────────────────────────────
-export const API_BASE_URL        = 'http://127.0.0.1:3000';
+// Dynamically resolves to whatever hostname the browser is using,
+// so both localhost:3001 and 192.168.x.x:3001 work without changes.
+export const API_BASE_URL = typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:3000`
+    : 'http://127.0.0.1:3000';
 
 // ── API defaults ──────────────────────────────────────────────────────────────
 export const DEFAULT_HISTORY_LIMIT    = 50;
