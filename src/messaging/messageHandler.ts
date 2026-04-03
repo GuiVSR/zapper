@@ -15,7 +15,7 @@ import { PooledMessage, DraftCallback, TranscriptionCallback } from './types';
 import { logMessage } from './logging';
 import { enrichWithDescriptions } from './enrichment';
 
-// Re-export types so existing imports from './handlers/messageHandler' still work
+// Re-export types so existing imports from './messaging/messageHandler' still work
 export type { PooledMessage, AIDraft, DraftCallback, TranscriptionCallback } from './types';
 
 // ── Handler ───────────────────────────────────────────────────────────────────

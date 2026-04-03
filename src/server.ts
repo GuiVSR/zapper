@@ -1,511 +1,365 @@
-import { Client, LocalAuth, Message, MessageMedia } from 'whatsapp-web.js';
-import qrcode from 'qrcode-terminal';
-import sharp from 'sharp';
-import fs from 'fs';
+import 'dotenv/config';
+import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_CHATS_LIMIT } from './constants';
+import express from 'express';
+import http from 'http';
+import { Server as SocketServer } from 'socket.io';
 import path from 'path';
+import { WhatsAppClient, ALLOWED_MEDIA_TYPES } from './client';
+import { MessageHandler } from './messaging/messageHandler';
+import cors from 'cors';
 
-export interface MessageHandler {
-    (message: Message): void;
-}
+const app = express();
+const server = http.createServer(app);
+const io = new SocketServer(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+    },
+});
 
-export interface StickerHandler {
-    (sticker: StickerInfo): void;
-}
-
-export interface StickerInfo {
-    message: Message;
-    data: Buffer;
-    mimeType: string;
-    isAnimated: boolean;
-    fileSize: number;
-    dimensions?: { width: number; height: number };
-    savedPath?: string;
-}
-
-export interface WhatsAppClientConfig {
-    headless?: boolean;
-    onQR?: (qr: string) => void;
-    onReady?: () => void;
-    onMessage?: MessageHandler;
-    onSticker?: StickerHandler;
-    onAuthFailure?: (msg: string) => void;
-    onDisconnected?: (reason: string) => void;
-    onError?: (error: Error) => void;
-    stickersDir?: string;
-}
-
-export interface MessageHistory {
-    id: string;
-    serializedId: string;
-    from: string;
-    to: string;
-    body: string;
-    timestamp: number;
-    type: string;
-    fromMe: boolean;
-    hasMedia: boolean;
-    author?: string;
-    isForwarded: boolean;
-}
-
-const AUTH_DIR      = '.wwebjs_auth';
-const TMP_DIR       = path.resolve('tmp');
-const STICKERS_DIR  = path.join(TMP_DIR, 'stickers');
-const REINIT_DELAY  = 3_000;
-const MAX_REINIT    = 5;
-
-/** Allowed MIME types for document uploads. */
-export const ALLOWED_MEDIA_TYPES = new Set([
-    // PDF
-    'application/pdf',
-    // Office
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',   // .docx
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',         // .xlsx
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
-    'application/msword',                                                        // .doc
-    'application/vnd.ms-excel',                                                  // .xls
-    // Images
-    'image/jpeg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-]);
-
-export class WhatsAppClient {
-    private client!: Client;
-    private config: WhatsAppClientConfig;
-    private isInitialized: boolean = false;
-    private stickersDir: string;
-    private reinitAttempts: number = 0;
-
-    constructor(config: WhatsAppClientConfig = {}) {
-        this.config = { headless: true, stickersDir: STICKERS_DIR, ...config };
-        this.stickersDir = this.config.stickersDir!;
-
-        // Ensure tmp/ and tmp/stickers/ exist
-        if (!fs.existsSync(TMP_DIR)) {
-            fs.mkdirSync(TMP_DIR, { recursive: true });
-        }
-        if (!fs.existsSync(this.stickersDir)) {
-            fs.mkdirSync(this.stickersDir, { recursive: true });
-        }
-
-        this.buildClient();
-    }
-
-    // ── Client construction & event wiring ────────────────────────────────────
-
-    private buildClient(): void {
-        this.client = new Client({
-            authStrategy: new LocalAuth(),
-            puppeteer: {
-                headless: this.config.headless,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            },
+// ── WhatsApp client ───────────────────────────────────────────────────────────
+const whatsappClient = new WhatsAppClient({
+    headless: true,
+    onQR: (qr: string) => {
+        console.log('📱 QR Code received, sending to frontend...');
+        io.emit('qr', { qr });
+    },
+    onReady: () => {
+        console.log('✅ WhatsApp client is ready!');
+        io.emit('ready', { message: 'WhatsApp is connected and ready!' });
+    },
+    onMessage: async (message) => {
+        io.emit('message', {
+            id:           message.id.id,
+            serializedId: message.id._serialized,
+            from:         message.from,
+            to:           message.to,
+            body:         message.body,
+            timestamp:    message.timestamp,
+            type:         message.type,
+            fromMe:       message.fromMe,
+            hasMedia:     message.hasMedia,
         });
 
-        this.setupEventHandlers();
-    }
+        await messageHandler.handleMessage(message);
 
-    private setupEventHandlers(): void {
-        this.client.on('qr', (qr: string) => {
-            if (this.config.onQR) {
-                this.config.onQR(qr);
-            } else {
-                console.log('📱 Scan this QR code with WhatsApp:');
-                qrcode.generate(qr, { small: true });
-            }
-        });
-
-        this.client.on('ready', () => {
-            this.isInitialized = true;
-            this.reinitAttempts = 0;
-            if (this.config.onReady) {
-                this.config.onReady();
-            } else {
-                console.log('✅ WhatsApp client is ready!');
-            }
-        });
-
-        this.client.on('message', async (message: Message) => {
-            if (message.type === 'sticker') {
-                await this.handleSticker(message);
-            }
-            if (this.config.onMessage) {
-                this.config.onMessage(message);
-            }
-        });
-
-        this.client.on('auth_failure', (msg: string) => {
-            console.error('❌ Auth failure:', msg);
-            this.isInitialized = false;
-            if (this.config.onAuthFailure) {
-                this.config.onAuthFailure(msg);
-            }
-            this.clearAuthSession();
-            this.scheduleReinit();
-        });
-
-        this.client.on('disconnected', (reason: string) => {
-            console.log('❌ Disconnected:', reason);
-            this.isInitialized = false;
-            if (this.config.onDisconnected) {
-                this.config.onDisconnected(reason);
-            }
-            if (reason === 'LOGOUT') {
-                this.clearAuthSession();
-            }
-            this.scheduleReinit();
-        });
-
-        this.client.on('error', (error: Error) => {
-            if (this.config.onError) {
-                this.config.onError(error);
-            } else {
-                console.error('❌ Error:', error);
-            }
-        });
-    }
-
-    // ── Session management ────────────────────────────────────────────────────
-
-    private clearAuthSession(): void {
-        try {
-            if (fs.existsSync(AUTH_DIR)) {
-                fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-                console.log('🗑  Cleared auth session — a new QR code will be shown on reconnect.');
-            }
-        } catch (err) {
-            console.error('Failed to clear auth session:', err);
-        }
-    }
-
-    private scheduleReinit(): void {
-        if (this.reinitAttempts >= MAX_REINIT) {
-            console.error(`❌ Gave up reinitialising after ${MAX_REINIT} attempts.`);
-            return;
-        }
-
-        this.reinitAttempts++;
-        console.log(`🔄 Reinitialising in ${REINIT_DELAY / 1000}s (attempt ${this.reinitAttempts}/${MAX_REINIT})…`);
-
-        setTimeout(async () => {
+        // Emit media for all supported types (image, audio, ptt, video, sticker, document)
+        if (message.hasMedia && message.type !== 'sticker') {
             try {
-                await this.client.destroy().catch(() => {});
-            } catch { /* ignore */ }
-
-            this.buildClient();
-
-            try {
-                await this.client.initialize();
-            } catch (err) {
-                console.error('❌ Reinit failed:', err);
-                this.clearAuthSession();
-                this.scheduleReinit();
-            }
-        }, REINIT_DELAY);
-    }
-
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    public async initialize(): Promise<void> {
-        if (this.isInitialized) {
-            console.warn('Client is already initialized');
-            return;
-        }
-
-        console.log('🚀 Initializing WhatsApp client...');
-
-        try {
-            await this.client.initialize();
-        } catch (err: any) {
-            console.error('❌ Initialize error:', err?.message ?? err);
-            this.clearAuthSession();
-            this.scheduleReinit();
-        }
-    }
-
-    public async getChatHistory(chatId: string, limit: number = 50): Promise<MessageHistory[]> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        let formattedId = chatId;
-        if (!formattedId.includes('@') && !formattedId.includes('-')) {
-            formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
-        }
-
-        const chat = await this.client.getChatById(formattedId);
-        const messages = await chat.fetchMessages({ limit });
-
-        return messages.map(msg => ({
-            id:           msg.id.id,
-            serializedId: msg.id._serialized,
-            from:         msg.from,
-            to:           msg.to,
-            body:         msg.body || '',
-            timestamp:    msg.timestamp,
-            type:         msg.type,
-            fromMe:       msg.fromMe,
-            hasMedia:     msg.hasMedia,
-            author:       msg.author,
-            isForwarded:  msg.isForwarded || false,
-        }));
-    }
-
-    public async getAllChatsWithMessages(limit: number = 10): Promise<Map<string, MessageHistory[]>> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        const chats = await this.client.getChats();
-        const chatHistory = new Map<string, MessageHistory[]>();
-
-        for (const chat of chats.slice(0, limit)) {
-            const messages = await chat.fetchMessages({ limit: 20 });
-            chatHistory.set(chat.id._serialized, messages.map(msg => ({
-                id:           msg.id.id,
-                serializedId: msg.id._serialized,
-                from:         msg.from,
-                to:           msg.to,
-                body:         msg.body || '',
-                timestamp:    msg.timestamp,
-                type:         msg.type,
-                fromMe:       msg.fromMe,
-                hasMedia:     msg.hasMedia,
-                author:       msg.author,
-                isForwarded:  msg.isForwarded || false,
-            })));
-        }
-
-        return chatHistory;
-    }
-
-    public async searchMessages(query: string, limit: number = 50): Promise<MessageHistory[]> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        const chats = await this.client.getChats();
-        const results: MessageHistory[] = [];
-
-        for (const chat of chats) {
-            const messages = await chat.fetchMessages({ limit: 100 });
-            const matches = messages
-                .filter(msg => msg.body?.toLowerCase().includes(query.toLowerCase()))
-                .map(msg => ({
-                    id:           msg.id.id,
-                    serializedId: msg.id._serialized,
-                    from:         msg.from,
-                    to:           msg.to,
-                    body:         msg.body || '',
-                    timestamp:    msg.timestamp,
-                    type:         msg.type,
-                    fromMe:       msg.fromMe,
-                    hasMedia:     msg.hasMedia,
-                    author:       msg.author,
-                    isForwarded:  msg.isForwarded || false,
-                }));
-            results.push(...matches);
-            if (results.length >= limit) break;
-        }
-
-        results.sort((a, b) => b.timestamp - a.timestamp);
-        return results.slice(0, limit);
-    }
-
-    public async sendMessage(to: string, message: string): Promise<any> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        let chatId = to;
-        if (!chatId.includes('@') && !chatId.includes('-')) {
-            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
-        }
-
-        const chat = await this.client.getChatById(chatId);
-        return chat.sendMessage(message);
-    }
-
-    /**
-     * Send a file (document, image, etc.) to a chat.
-     * @param to      Chat ID or phone number
-     * @param base64  Base64-encoded file data
-     * @param mimetype MIME type of the file
-     * @param filename Original filename (shown to recipient)
-     * @param caption  Optional caption text
-     */
-    public async sendMedia(
-        to: string,
-        base64: string,
-        mimetype: string,
-        filename: string,
-        caption?: string,
-    ): Promise<any> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        let chatId = to;
-        if (!chatId.includes('@') && !chatId.includes('-')) {
-            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
-        }
-
-        const media = new MessageMedia(mimetype, base64, filename);
-        const chat  = await this.client.getChatById(chatId);
-
-        return chat.sendMessage(media, {
-            caption: caption || undefined,
-            sendMediaAsDocument: true,
-        });
-    }
-
-    public async markChatAsRead(chatId: string): Promise<void> {
-        if (!this.isInitialized) return;
-
-        let formattedId = chatId;
-        if (!formattedId.includes('@') && !formattedId.includes('-')) {
-            formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
-        }
-
-        const chat = await this.client.getChatById(formattedId);
-        await chat.sendSeen();
-    }
-
-    public async sendSticker(to: string, stickerPath: string): Promise<void> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        let chatId = to;
-        if (!chatId.includes('@') && !chatId.includes('-')) {
-            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
-        }
-
-        const media = MessageMedia.fromFilePath(stickerPath);
-        const chat  = await this.client.getChatById(chatId);
-        await chat.sendMessage(media, { sendMediaAsSticker: true });
-    }
-
-    public async getContactInfo(contactId: string) {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        try {
-            const contact = await this.client.getContactById(contactId);
-            return {
-                number:   contact.number,
-                name:     contact.name,
-                pushname: contact.pushname,
-                isMe:     contact.isMe,
-                isUser:   contact.isUser,
-            };
-        } catch {
-            return null;
-        }
-    }
-
-    public async getMessageMedia(serializedId: string): Promise<{ mimetype: string; data: string } | null> {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-
-        try {
-            const parts = serializedId.split('_');
-            if (parts.length < 3) throw new Error(`Cannot parse serializedId: ${serializedId}`);
-            const chatId = parts[1];
-            const shortId = parts.slice(2).join('_');
-
-            const chat = await this.client.getChatById(chatId);
-
-            for (const limit of [50, 200, 500]) {
-                const messages = await chat.fetchMessages({ limit });
-                const msg = messages.find(m => m.id._serialized === serializedId || m.id.id === shortId);
-                if (msg) {
-                    if (!msg.hasMedia) return null;
-                    const media = await msg.downloadMedia();
-                    if (!media) return null;
-                    return { mimetype: media.mimetype, data: media.data };
+                const media = await message.downloadMedia();
+                if (media) {
+                    io.emit('media', {
+                        messageId: message.id.id,
+                        from:      message.from,
+                        mimetype:  media.mimetype,
+                        data:      media.data,
+                        filename:  media.filename || null,
+                    });
                 }
-            }
-
-            console.warn(`[getMessageMedia] Message not found: ${serializedId}`);
-            return null;
-        } catch (err) {
-            console.error(`[getMessageMedia] Failed for ${serializedId}:`, err);
-            return null;
+            } catch { /* non-critical */ }
         }
-    }
+    },
+    onSticker: (stickerInfo) => {
+        console.log(`🎨 Sticker received from ${stickerInfo.message.from}`);
+        io.emit('media', {
+            messageId:  stickerInfo.message.id.id,
+            from:       stickerInfo.message.from,
+            mimetype:   stickerInfo.mimeType,
+            data:       stickerInfo.data.toString('base64'),
+            filename:   null,
+            isSticker:  true,
+            isAnimated: stickerInfo.isAnimated,
+        });
+    },
+    onAuthFailure: (msg) => {
+        console.error('❌ Auth failure:', msg);
+        io.emit('auth_failure', { message: msg });
+    },
+    onDisconnected: (reason) => {
+        console.log('❌ Disconnected:', reason);
+        io.emit('disconnected', { reason });
+    },
+    onError: (error) => {
+        console.error('❌ Error:', error);
+        io.emit('error', { message: error.message });
+    },
+});
 
-    public async getChats() {
-        if (!this.isInitialized) throw new Error('Client not initialized.');
-        return this.client.getChats();
+// ── Message handler ───────────────────────────────────────────────────────────
+const messageHandler = new MessageHandler(
+    whatsappClient,
+    process.env.WEBHOOK_URL,
+    (draft) => {
+        console.log(`[Server] Emitting ai_draft for chat ${draft.chatId} (${draft.parts.length} part(s))`);
+        io.emit('ai_draft', draft);
+    },
+    (data) => {
+        console.log(`[Server] Emitting transcription for message ${data.messageId}`);
+        io.emit('transcription', data);
     }
+);
 
-    public async logout(): Promise<void> {
-        if (!this.isInitialized) return;
-        await this.client.logout();
-        this.isInitialized = false;
+// ── Middleware ────────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+app.use((req, _res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+});
+
+// ── API routes ────────────────────────────────────────────────────────────────
+app.get('/api/test', (_req, res) => {
+    res.json({ message: 'Server is working!', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/status', (_req, res) => {
+    res.json({
+        ready: whatsappClient.isReady(),
+        timestamp: new Date().toISOString(),
+    });
+});
+
+app.get('/api/chats', async (_req, res) => {
+    if (!whatsappClient.isReady()) {
+        return res.status(503).json({ error: 'WhatsApp client not ready' });
     }
+    try {
+        const chats = await whatsappClient.getChats();
+        res.json(
+            chats.map(chat => ({
+                id:          chat.id._serialized,
+                name:        chat.name || chat.id.user || 'Unknown',
+                isGroup:     chat.isGroup,
+                unreadCount: chat.unreadCount,
+                timestamp:   chat.timestamp,
+            }))
+        );
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch chats', details: err.message });
+    }
+});
 
-    public async destroy(): Promise<void> {
-        if (this.client) {
-            await this.client.destroy();
-            this.isInitialized = false;
+app.get('/api/history/:chatId', async (req, res) => {
+    if (!whatsappClient.isReady()) {
+        return res.status(503).json({ error: 'WhatsApp client not ready' });
+    }
+    try {
+        const { chatId } = req.params;
+        const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
+        const history = await whatsappClient.getChatHistory(chatId, limit);
+        const sorted  = [...history].sort((a, b) => a.timestamp - b.timestamp);
+        res.json({ chatId, count: sorted.length, messages: sorted });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch chat history', details: err.message });
+    }
+});
+
+app.get('/api/search', async (req, res) => {
+    const { q, limit } = req.query;
+    if (!q) return res.status(400).json({ error: 'Missing query parameter "q"' });
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    try {
+        const results = await whatsappClient.searchMessages(q as string, parseInt(limit as string) || DEFAULT_SEARCH_LIMIT);
+        res.json({ query: q, count: results.length, results });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to search messages', details: err.message });
+    }
+});
+
+app.get('/api/chats-with-messages', async (req, res) => {
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    try {
+        const limit = parseInt(req.query.limit as string) || 10;
+        const chatsWithMessages = await whatsappClient.getAllChatsWithMessages(limit);
+        const formatted = Array.from(chatsWithMessages.entries()).map(([chatId, messages]) => ({
+            chatId,
+            messageCount: messages.length,
+            messages:     messages.slice(0, 10),
+        }));
+        res.json({ count: formatted.length, chats: formatted });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch chats with messages', details: err.message });
+    }
+});
+
+app.get('/api/conversation/:number', async (req, res) => {
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    try {
+        const { number } = req.params;
+        const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
+        let chatId = number;
+        if (!chatId.includes('@') && !chatId.includes('-')) {
+            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
         }
+        const history = await whatsappClient.getChatHistory(chatId, limit);
+        let contactInfo = null;
+        try { contactInfo = await whatsappClient.getContactInfo(chatId); } catch { /* ok */ }
+        res.json({ contact: number, contactInfo, count: history.length, messages: history });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch conversation', details: err.message });
+    }
+});
+
+app.post('/api/send-message', async (req, res) => {
+    const { to, message } = req.body;
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!to || !message) return res.status(400).json({ error: 'Missing "to" or "message" field' });
+    try {
+        const result = await whatsappClient.sendMessage(to, message);
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
+        res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to send message', details: err.message });
+    }
+});
+
+app.post('/api/send-media', async (req, res) => {
+    const { to, data, mimetype, filename, caption } = req.body;
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!to || !data || !mimetype || !filename) {
+        return res.status(400).json({ error: 'Missing required fields: to, data, mimetype, filename' });
+    }
+    if (!ALLOWED_MEDIA_TYPES.has(mimetype)) {
+        return res.status(400).json({
+            error: `Unsupported file type: ${mimetype}`,
+            allowed: Array.from(ALLOWED_MEDIA_TYPES),
+        });
+    }
+    try {
+        const result = await whatsappClient.sendMedia(to, data, mimetype, filename, caption);
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
+        res.json({ success: true, message: 'Media sent successfully', id: result.id.id });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to send media', details: err.message });
+    }
+});
+
+app.get('/api/media', async (req, res) => {
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    const serializedId = req.query.id as string;
+    if (!serializedId) return res.status(400).json({ error: 'Missing "id" query parameter' });
+    try {
+        const media = await whatsappClient.getMessageMedia(decodeURIComponent(serializedId));
+        if (!media) return res.status(404).json({ error: 'No media found for this message' });
+        res.json({ messageId: serializedId, mimetype: media.mimetype, data: media.data });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to fetch media', details: err.message });
+    }
+});
+
+app.post('/api/logout', async (_req, res) => {
+    try {
+        await whatsappClient.logout();
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to logout', details: err.message });
+    }
+});
+
+app.post('/api/settings', (req, res) => {
+    const { maxDraftParts } = req.body;
+    if (typeof maxDraftParts === 'number' && maxDraftParts >= 1) {
+        messageHandler.maxDraftParts = Math.floor(maxDraftParts);
+        console.log(`[Settings] maxDraftParts updated to ${messageHandler.maxDraftParts}`);
+    }
+    res.json({ maxDraftParts: messageHandler.maxDraftParts });
+});
+
+app.post('/api/generate-drafts', async (req, res) => {
+    const { chatIds, limit, maxDraftParts } = req.body;
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!Array.isArray(chatIds) || chatIds.length === 0) return res.status(400).json({ error: 'Missing or empty "chatIds" array' });
+
+    const messageLimit = typeof limit         === 'number' && limit         > 0  ? limit         : 10;
+    const partsLimit   = typeof maxDraftParts  === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
+
+    messageHandler.generateDraftsForChats(chatIds, messageLimit, partsLimit)
+        .catch(err => console.error('[Server] generate-drafts error:', err));
+
+    res.json({ accepted: chatIds.length, limit: messageLimit, maxDraftParts: partsLimit });
+});
+
+// ── Static file serving ───────────────────────────────────────────────────────
+const publicPath = path.join(__dirname, '../public');
+app.use(express.static(publicPath));
+
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) return next();
+    res.sendFile(path.join(publicPath, 'index.html'));
+});
+
+// ── WhatsApp init ─────────────────────────────────────────────────────────────
+console.log('🚀 Starting WhatsApp client...');
+whatsappClient.initialize().catch(err => {
+    console.error('Failed to initialize WhatsApp client:', err);
+});
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+io.on('connection', (socket) => {
+    console.log('✅ Client connected:', socket.id);
+    socket.emit('ready', { message: 'Connected to WhatsApp server!' });
+    if (whatsappClient.isReady()) {
+        socket.emit('client_ready', { message: 'WhatsApp client is already ready!' });
     }
 
-    public isReady(): boolean {
-        return this.isInitialized;
-    }
+    socket.on('get_chats', async () => {
+        if (!whatsappClient.isReady()) return socket.emit('error', { message: 'WhatsApp client not ready' });
+        const chats = await whatsappClient.getChats();
+        socket.emit('chats_list', chats.map(c => ({
+            id:          c.id._serialized,
+            name:        c.name,
+            isGroup:     c.isGroup,
+            unreadCount: c.unreadCount,
+        })));
+    });
 
-    public getRawClient(): Client {
-        return this.client;
-    }
-
-    // ── Sticker handling ──────────────────────────────────────────────────────
-
-    private async handleSticker(message: Message): Promise<void> {
+    socket.on('get_chat_history', async ({ chatId, limit = 50 }) => {
+        if (!whatsappClient.isReady()) return socket.emit('error', { message: 'WhatsApp client not ready' });
         try {
-            const media = await message.downloadMedia();
-            if (!media) return;
-
-            const buffer     = Buffer.from(media.data, 'base64');
-            const isAnimated = media.mimetype === 'image/webp' && this.isAnimatedWebp(buffer);
-
-            const stickerInfo: StickerInfo = {
-                message,
-                data:     buffer,
-                mimeType: media.mimetype,
-                isAnimated,
-                fileSize: buffer.length,
-            };
-
-            try {
-                const metadata = await sharp(buffer).metadata();
-                stickerInfo.dimensions = { width: metadata.width || 0, height: metadata.height || 0 };
-            } catch { /* dimensions not available */ }
-
-            const filename  = `sticker_${Date.now()}_${message.id.id}.webp`;
-            const filepath  = path.join(this.stickersDir, filename);
-            fs.writeFileSync(filepath, buffer);
-            stickerInfo.savedPath = filepath;
-
-            if (this.config.onSticker) {
-                this.config.onSticker(stickerInfo);
-            } else {
-                this.displaySticker(stickerInfo);
-            }
-        } catch (err) {
-            console.error('Error handling sticker:', err);
+            const history = await whatsappClient.getChatHistory(chatId, limit);
+            socket.emit('chat_history', { chatId, count: history.length, messages: history });
+        } catch (err: any) {
+            socket.emit('error', { message: `Failed to fetch chat history: ${err.message}` });
         }
-    }
+    });
 
-    private isAnimatedWebp(buffer: Buffer): boolean {
+    socket.on('send_message', async ({ to, message }) => {
+        if (!whatsappClient.isReady()) return socket.emit('error', { message: 'WhatsApp client not ready' });
         try {
-            return buffer.toString('ascii', 0, 12).includes('ANIM');
+            await whatsappClient.sendMessage(to, message);
+            socket.emit('message_sent', { success: true, to, message });
         } catch {
-            return false;
+            socket.emit('error', { message: 'Failed to send message' });
         }
-    }
+    });
 
-    private displaySticker(stickerInfo: StickerInfo): void {
-        console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log(`🎨 Sticker received from: ${stickerInfo.message.from}`);
-        console.log(`Type: ${stickerInfo.isAnimated ? 'Animated' : 'Static'}`);
-        console.log(`Size: ${(stickerInfo.fileSize / 1024).toFixed(2)} KB`);
-        if (stickerInfo.dimensions) console.log(`Dimensions: ${stickerInfo.dimensions.width}x${stickerInfo.dimensions.height}`);
-        if (stickerInfo.savedPath)  console.log(`Saved to: ${stickerInfo.savedPath}`);
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    }
-}
+    socket.on('disconnect', () => {
+        console.log('❌ Client disconnected:', socket.id);
+    });
+});
 
-export function createWhatsAppClient(config?: WhatsAppClientConfig): WhatsAppClient {
-    return new WhatsAppClient(config);
-}
+// ── Start — bind to all interfaces so LAN access works ───────────────────────
+const PORT = SERVER_PORT;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
+    console.log(`   Local:   http://localhost:${PORT}`);
+    console.log(`   Network: http://<your-ip>:${PORT}`);
+    console.log(`\n📱 API endpoints:`);
+    console.log(`   GET  /api/test`);
+    console.log(`   GET  /api/status`);
+    console.log(`   GET  /api/chats`);
+    console.log(`   GET  /api/history/:chatId`);
+    console.log(`   GET  /api/search?q=query`);
+    console.log(`   GET  /api/chats-with-messages`);
+    console.log(`   GET  /api/conversation/:number`);
+    console.log(`   POST /api/send-message`);
+    console.log(`   POST /api/send-media`);
+    console.log(`   POST /api/generate-drafts`);
+    console.log(`\n🤖 Socket events emitted:`);
+    console.log(`   ai_draft  — AI draft ready for review`);
+});
+
+process.on('SIGTERM', () => { messageHandler.destroy(); process.exit(0); });
+process.on('SIGINT',  () => { messageHandler.destroy(); process.exit(0); });
