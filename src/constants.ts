@@ -3,14 +3,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Server ────────────────────────────────────────────────────────────────────
-export const SERVER_PORT         = 3000;
+export const SERVER_PORT         = 3002;
 
 // ── Frontend ──────────────────────────────────────────────────────────────────
-// Dynamically resolves to whatever hostname the browser is using,
-// so both localhost:3001 and 192.168.x.x:3001 work without changes.
+// Connects directly to the backend server (not through the webpack proxy).
+// Uses the browser's hostname so it works from both localhost and network IPs.
 export const API_BASE_URL = typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3000`
-    : 'http://127.0.0.1:3000';
+    ? `${window.location.protocol}//${window.location.hostname}:${SERVER_PORT}`
+    : `http://127.0.0.1:${SERVER_PORT}`;
 
 // ── API defaults ──────────────────────────────────────────────────────────────
 export const DEFAULT_HISTORY_LIMIT    = 50;
