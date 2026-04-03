@@ -36,6 +36,39 @@ interface MediaItem {
     from: string;
     mimetype: string;
     data: string; // base64
+    filename?: string | null;
+    isSticker?: boolean;
+    isAnimated?: boolean;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const ACCEPTED_FILE_TYPES = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/msword',
+    'application/vnd.ms-excel',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+].join(',');
+
+function getFileIcon(mimetype: string): string {
+    if (mimetype === 'application/pdf') return '📕';
+    if (mimetype.includes('word') || mimetype === 'application/msword') return '📘';
+    if (mimetype.includes('spreadsheet') || mimetype.includes('ms-excel')) return '📗';
+    if (mimetype.includes('presentation')) return '📙';
+    if (mimetype.startsWith('image/')) return '🖼️';
+    return '📄';
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ── Favicon ───────────────────────────────────────────────────────────────────
@@ -76,7 +109,7 @@ function App() {
     const [loggingOut, setLoggingOut]         = useState(false);
     const [drafts, setDrafts]               = useState<Record<string, AIDraft>>({});
     const [media, setMedia]                 = useState<Record<string, MediaItem>>({});
-    const [lightbox, setLightbox]           = useState<MediaItem | null>(null);
+    const [lightbox, setLightbox]           = useState<{ mimetype: string; data: string } | null>(null);
     const [transcriptions, setTranscriptions] = useState<Record<string, string>>({});
 
     // Multi-select
@@ -92,6 +125,10 @@ function App() {
 
     // Max draft parts — controls how many parts the AI should split into
     const [maxDraftParts, setMaxDraftParts] = useState(DEFAULT_MAX_DRAFT_PARTS);
+
+    // File upload
+    const [sendingMedia, setSendingMedia] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const socketRef       = useRef<any>(null);
     const selectedChatRef = useRef<Chat | null>(null);
@@ -166,9 +203,11 @@ function App() {
         } catch (err: any) { setError(err.message); setStatus('Error loading chats'); }
     };
 
+    const MEDIA_FETCH_TYPES = new Set(['image', 'audio', 'ptt', 'video', 'sticker', 'document']);
+
     const fetchMediaForMessages = (msgs: Message[]) => {
         msgs
-            .filter(m => m.hasMedia && (m.type === 'image' || m.type === 'audio' || m.type === 'ptt') && m.serializedId)
+            .filter(m => m.hasMedia && MEDIA_FETCH_TYPES.has(m.type) && m.serializedId)
             .forEach(async msg => {
                 try {
                     const res = await fetch(
@@ -178,7 +217,14 @@ function App() {
                     const item = await res.json();
                     setMedia(prev => ({
                         ...prev,
-                        [msg.id]: { messageId: msg.id, from: msg.from, mimetype: item.mimetype, data: item.data },
+                        [msg.id]: {
+                            messageId: msg.id,
+                            from: msg.from,
+                            mimetype: item.mimetype,
+                            data: item.data,
+                            filename: item.filename || null,
+                            isSticker: msg.type === 'sticker',
+                        },
                     }));
                 } catch { /* non-critical */ }
             });
@@ -238,6 +284,71 @@ function App() {
             setChats(prev => prev.map(c => c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c));
             setMessageInput('');
         } catch (err: any) { setError(err.message); }
+    };
+
+    // ── File upload ───────────────────────────────────────────────────────────
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !selectedChat || sendingMedia) return;
+
+        setSendingMedia(true);
+        try {
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const result = reader.result as string;
+                    // strip data:...;base64, prefix
+                    resolve(result.split(',')[1]);
+                };
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch(`${API_BASE_URL}/api/send-media`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: selectedChat.id,
+                    data: base64,
+                    mimetype: file.type,
+                    filename: file.name,
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+
+            // Add optimistic message to chat
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                from: 'me',
+                to: selectedChat.id,
+                body: `📎 ${file.name}`,
+                timestamp: Math.floor(Date.now() / 1000),
+                type: 'document',
+                fromMe: true,
+            }]);
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setSendingMedia(false);
+            // Reset input so re-uploading the same file triggers onChange
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    // ── Document download ─────────────────────────────────────────────────────
+
+    const downloadDocument = (item: MediaItem) => {
+        const link = document.createElement('a');
+        link.href = `data:${item.mimetype};base64,${item.data}`;
+        link.download = item.filename || 'document';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     // ── Draft actions ─────────────────────────────────────────────────────────
@@ -362,6 +473,95 @@ function App() {
 
     const currentDraft = selectedChat ? drafts[selectedChat.id] : null;
     const isMultiPart  = (currentDraft?.parts.length ?? 0) > 1;
+
+    // ── Media rendering helpers ───────────────────────────────────────────────
+
+    const renderMediaContent = (msg: Message) => {
+        const item = media[msg.id];
+
+        if (!item) {
+            // Still loading
+            if (!msg.hasMedia) return null;
+            const placeholders: Record<string, string> = {
+                image:    '🖼️ Loading image…',
+                video:    '🎥 Loading video…',
+                audio:    '🎵 Loading audio…',
+                ptt:      '🎵 Loading audio…',
+                sticker:  '🎨 Loading sticker…',
+                document: '📄 Loading document…',
+            };
+            return <div className="media-placeholder">{placeholders[msg.type] || '📎 Media'}</div>;
+        }
+
+        // Sticker
+        if (item.isSticker || msg.type === 'sticker') {
+            return (
+                <img
+                    className="bubble-sticker"
+                    src={`data:${item.mimetype};base64,${item.data}`}
+                    alt="sticker"
+                />
+            );
+        }
+
+        // Image
+        if (item.mimetype.startsWith('image/')) {
+            return (
+                <img
+                    className="bubble-image"
+                    src={`data:${item.mimetype};base64,${item.data}`}
+                    alt="received image"
+                    onClick={() => setLightbox({ mimetype: item.mimetype, data: item.data })}
+                />
+            );
+        }
+
+        // Video
+        if (item.mimetype.startsWith('video/')) {
+            return (
+                <div
+                    className="bubble-video-container"
+                    onClick={() => setLightbox({ mimetype: item.mimetype, data: item.data })}
+                >
+                    <video
+                        className="bubble-video"
+                        src={`data:${item.mimetype};base64,${item.data}`}
+                        muted
+                        preload="metadata"
+                    />
+                    <div className="video-play-overlay">▶</div>
+                </div>
+            );
+        }
+
+        // Audio
+        if (item.mimetype.startsWith('audio/')) {
+            return (
+                <audio
+                    className="bubble-audio"
+                    controls
+                    src={`data:${item.mimetype};base64,${item.data}`}
+                />
+            );
+        }
+
+        // Document
+        if (msg.type === 'document' || item.filename) {
+            const sizeBytes = Math.round(item.data.length * 0.75); // approximate decoded size
+            return (
+                <div className="bubble-document" onClick={() => downloadDocument(item)}>
+                    <span className="doc-icon">{getFileIcon(item.mimetype)}</span>
+                    <div className="doc-info">
+                        <span className="doc-name">{item.filename || 'Document'}</span>
+                        <span className="doc-size">{formatFileSize(sizeBytes)}</span>
+                    </div>
+                    <span className="doc-download">⬇</span>
+                </div>
+            );
+        }
+
+        return null;
+    };
 
     return (
         <div className="app">
@@ -489,37 +689,13 @@ function App() {
                             <div className="messages">
                                 {messages.map((msg, i) => (
                                     <div key={msg.id || i} className={`bubble ${msg.fromMe ? 'sent' : 'received'}`}>
-                                        {media[msg.id] && media[msg.id].mimetype.startsWith('image/') && (
-                                            <img
-                                                className="bubble-image"
-                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
-                                                alt="received image"
-                                                onClick={() => setLightbox(media[msg.id])}
-                                            />
-                                        )}
-                                        {media[msg.id] && media[msg.id].mimetype.startsWith('audio/') && (
-                                            <audio
-                                                className="bubble-audio"
-                                                controls
-                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
-                                            />
-                                        )}
+                                        {renderMediaContent(msg)}
                                         {transcriptions[msg.id] && (
                                             <div className="transcription">
                                                 {transcriptions[msg.id]}
                                             </div>
                                         )}
-                                        {msg.body && <div>{msg.body}</div>}
-                                        {msg.hasMedia && !media[msg.id] && (
-                                            <div className="media-placeholder">
-                                                {msg.type === 'image'    ? '🖼️ Loading image…'  :
-                                                 msg.type === 'video'    ? '🎥 Video'            :
-                                                 msg.type === 'audio' || msg.type === 'ptt' ? '🎵 Loading audio…' :
-                                                 msg.type === 'document' ? '📄 Document'         :
-                                                 msg.type === 'sticker'  ? '🎨 Sticker'          :
-                                                                           '📎 Media'}
-                                            </div>
-                                        )}
+                                        {msg.body && msg.type !== 'sticker' && <div>{msg.body}</div>}
                                         <span className="time">{formatTimestamp(msg.timestamp)}</span>
                                     </div>
                                 ))}
@@ -598,6 +774,21 @@ function App() {
                                     onKeyDown={e => e.key === 'Enter' && sendMessage()}
                                     placeholder="Type a message"
                                 />
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept={ACCEPTED_FILE_TYPES}
+                                    onChange={handleFileUpload}
+                                    style={{ display: 'none' }}
+                                />
+                                <button
+                                    className="btn-attach"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={sendingMedia}
+                                    title="Send a file (PDF, DOCX, XLSX, images)"
+                                >
+                                    {sendingMedia ? '⏳' : '📎'}
+                                </button>
                                 <button
                                     className="btn-generate-single"
                                     onClick={generateDraftForCurrentChat}
@@ -618,14 +809,24 @@ function App() {
                     )}
                 </div>
             </div>
-            {/* Lightbox */}
+            {/* Lightbox — supports both images and videos */}
             {lightbox && (
                 <div className="lightbox" onClick={() => setLightbox(null)}>
-                    <img
-                        src={`data:${lightbox.mimetype};base64,${lightbox.data}`}
-                        alt="full size"
-                        onClick={e => e.stopPropagation()}
-                    />
+                    {lightbox.mimetype.startsWith('video/') ? (
+                        <video
+                            className="lightbox-video"
+                            src={`data:${lightbox.mimetype};base64,${lightbox.data}`}
+                            controls
+                            autoPlay
+                            onClick={e => e.stopPropagation()}
+                        />
+                    ) : (
+                        <img
+                            src={`data:${lightbox.mimetype};base64,${lightbox.data}`}
+                            alt="full size"
+                            onClick={e => e.stopPropagation()}
+                        />
+                    )}
                     <button className="lightbox-close" onClick={() => setLightbox(null)}>✕</button>
                 </div>
             )}

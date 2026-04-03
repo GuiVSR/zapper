@@ -54,6 +54,23 @@ const STICKERS_DIR  = path.join(TMP_DIR, 'stickers');
 const REINIT_DELAY  = 3_000;
 const MAX_REINIT    = 5;
 
+/** Allowed MIME types for document uploads. */
+export const ALLOWED_MEDIA_TYPES = new Set([
+    // PDF
+    'application/pdf',
+    // Office
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',   // .docx
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',         // .xlsx
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+    'application/msword',                                                        // .doc
+    'application/vnd.ms-excel',                                                  // .xls
+    // Images
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+]);
+
 export class WhatsAppClient {
     private client!: Client;
     private config: WhatsAppClientConfig;
@@ -301,6 +318,37 @@ export class WhatsAppClient {
 
         const chat = await this.client.getChatById(chatId);
         return chat.sendMessage(message);
+    }
+
+    /**
+     * Send a file (document, image, etc.) to a chat.
+     * @param to      Chat ID or phone number
+     * @param base64  Base64-encoded file data
+     * @param mimetype MIME type of the file
+     * @param filename Original filename (shown to recipient)
+     * @param caption  Optional caption text
+     */
+    public async sendMedia(
+        to: string,
+        base64: string,
+        mimetype: string,
+        filename: string,
+        caption?: string,
+    ): Promise<any> {
+        if (!this.isInitialized) throw new Error('Client not initialized.');
+
+        let chatId = to;
+        if (!chatId.includes('@') && !chatId.includes('-')) {
+            chatId = `${chatId.replace(/[^0-9+]/g, '')}@c.us`;
+        }
+
+        const media = new MessageMedia(mimetype, base64, filename);
+        const chat  = await this.client.getChatById(chatId);
+
+        return chat.sendMessage(media, {
+            caption: caption || undefined,
+            sendMediaAsDocument: true,
+        });
     }
 
     public async markChatAsRead(chatId: string): Promise<void> {

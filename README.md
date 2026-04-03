@@ -119,26 +119,38 @@ Set `SYSTEM_PROMPT` in your `.env` file — no code changes needed. If `SYSTEM_P
 
 ```
 zapper/
-├── src/
-│   ├── server.ts              # Express + Socket.IO server
-│   ├── client.ts              # WhatsApp Web client wrapper
-│   ├── handlers/
-│   │   └── messageHandler.ts  # Message logging, pooling, AI draft trigger
-│   ├── transcription/
-│   │   └── deepgram.ts        # Deepgram audio transcription client
-│   ├── llm/
-│   │   ├── groq.ts            # Groq client (active)
-│   │   ├── deepseek.ts        # DeepSeek client (alternative)
-│   │   └── gemini.ts          # Google Gemini client (alternative)
-│   └── frontend/
-│       ├── App.tsx            # Main React app
-│       ├── App.css            # Styles
-│       └── index.tsx          # React entry point
 ├── public/
-│   └── index.html             # HTML shell
-├── .env                       # Your environment variables (never commit this)
-├── .gitignore
+│   └── index.html
+├── src/
+│   ├── frontend/
+│   │   ├── App.css
+│   │   ├── App.tsx
+│   │   ├── css-modules.d.ts
+│   │   └── index.tsx
+│   ├── llm/
+│   │   ├── deepseek.ts
+│   │   ├── gemini.ts
+│   │   ├── groq.ts
+│   │   └── index.ts
+│   ├── messaging/
+│   │   ├── enrichment.ts
+│   │   ├── logging.ts
+│   │   ├── messageHandler.ts
+│   │   └── types.ts
+│   ├── transcription/
+│   │   ├── cache.ts
+│   │   └── deepgram.ts
+│   ├── client.ts
+│   ├── constants.ts
+│   ├── debug.ts
+│   ├── main.ts
+│   └── server.ts
+├── tmp/
+│   └── stickers/
+├── CHANGELOG.md
 ├── package.json
+├── package-lock.json
+├── README.md
 ├── tsconfig.json
 └── webpack.config.js
 ```
