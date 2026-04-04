@@ -2,7 +2,7 @@
 // imageCache.ts — persists AI-generated image descriptions to disk and keeps
 // an in-memory copy so:
 //   • every lookup is O(1) with no disk I/O after the first load
-//   • descriptions survive server restarts (written to tmp/.image-descriptions.json)
+//   • descriptions survive server restarts (written to tmp/.descriptions.json)
 //   • an image is NEVER sent to the vision model twice
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -11,7 +11,7 @@ import path from 'path';
 import chalk from 'chalk';
 
 const TMP_DIR    = path.resolve('tmp');
-const CACHE_PATH = path.join(TMP_DIR, '.image-descriptions.json');
+const CACHE_PATH = path.join(TMP_DIR, '.descriptions.json');
 
 // Ensure tmp/ exists on first import
 if (!fs.existsSync(TMP_DIR)) {

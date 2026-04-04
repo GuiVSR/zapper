@@ -1,68 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
-import io from 'socket.io-client';
 import './App.css';
-import { API_BASE_URL, FAVICON_SIZE, FAVICON_COLOR, HISTORY_CONTEXT, DEFAULT_MAX_DRAFT_PARTS } from '../constants';
-
-interface Message {
-    id: string;
-    serializedId?: string;
-    from: string;
-    to?: string;
-    body: string;
-    timestamp: number;
-    type: string;
-    fromMe?: boolean;
-    hasMedia?: boolean;
-}
-
-interface Chat {
-    id: string;
-    name: string;
-    isGroup: boolean;
-    unreadCount: number;
-    timestamp?: number;
-}
-
-interface AIDraft {
-    chatId: string;
-    /** One element per message part — length 1 when no splitting. */
-    parts: string[];
-    basedOnMessages: Message[];
-    generatedAt: number;
-}
-
-interface MediaItem {
-    messageId: string;
-    from: string;
-    mimetype: string;
-    data: string; // base64
-}
-
-// ── Favicon ───────────────────────────────────────────────────────────────────
-function updateFavicon(count: number): void {
-    const canvas = document.createElement('canvas');
-    canvas.width  = FAVICON_SIZE;
-    canvas.height = FAVICON_SIZE;
-    const ctx = canvas.getContext('2d')!;
-    ctx.beginPath();
-    ctx.arc(FAVICON_SIZE / 2, FAVICON_SIZE / 2, FAVICON_SIZE / 2 - 1, 0, 2 * Math.PI);
-    ctx.fillStyle = FAVICON_COLOR;
-    ctx.fill();
-    ctx.fillStyle = 'white';
-    if (count > 0) {
-        ctx.font = `bold ${count > 9 ? '14' : '18'}px sans-serif`;
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(count > 99 ? '99+' : String(count), FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
-    } else {
-        ctx.font = 'bold 18px sans-serif';
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Z', FAVICON_SIZE / 2, FAVICON_SIZE / 2 + 1);
-    }
-    const link = document.getElementById('favicon') as HTMLLinkElement;
-    if (link) link.href = canvas.toDataURL('image/png');
-}
+import { API_BASE_URL, HISTORY_CONTEXT, DEFAULT_MAX_DRAFT_PARTS } from '../constants';
+import { Message, Chat, AIDraft, MediaItem } from './types';
+import { updateFavicon } from './utils/favicon';
+import { useSocket } from './hooks/useSocket';
+import { Header } from './components/Header';
+import { QrCode } from './components/QrCode';
+import { ErrorBar } from './components/ErrorBar';
+import { Lightbox } from './components/Lightbox';
+import { Sidebar } from './components/Sidebar/Sidebar';
+import { ChatArea } from './components/ChatArea/ChatArea';
 
 function App() {
     const [messages, setMessages]           = useState<Message[]>([]);
@@ -76,7 +23,7 @@ function App() {
     const [loggingOut, setLoggingOut]         = useState(false);
     const [drafts, setDrafts]               = useState<Record<string, AIDraft>>({});
     const [media, setMedia]                 = useState<Record<string, MediaItem>>({});
-    const [lightbox, setLightbox]           = useState<MediaItem | null>(null);
+    const [lightbox, setLightbox]           = useState<{ mimetype: string; data: string } | null>(null);
     const [transcriptions, setTranscriptions] = useState<Record<string, string>>({});
 
     // Multi-select
@@ -93,7 +40,10 @@ function App() {
     // Max draft parts — controls how many parts the AI should split into
     const [maxDraftParts, setMaxDraftParts] = useState(DEFAULT_MAX_DRAFT_PARTS);
 
-    const socketRef       = useRef<any>(null);
+    // File upload
+    const [sendingMedia, setSendingMedia] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const selectedChatRef = useRef<Chat | null>(null);
     const messagesEndRef  = useRef<HTMLDivElement>(null);
 
@@ -110,65 +60,35 @@ function App() {
         }).catch(() => {/* non-critical */});
     }, [maxDraftParts]);
 
-    useEffect(() => {
-        const socket = io(API_BASE_URL, { transports: ['websocket'] });
-        socketRef.current = socket;
-
-        socket.on('connect',    () => { setStatus('Connected to server'); setError(''); });
-        socket.on('disconnect', (reason: string) => setStatus(`Disconnected: ${reason}`));
-        socket.on('qr', (data: { qr: string }) => { setQrCode(data.qr); setStatus('Scan QR code with WhatsApp'); });
-        socket.on('ready',        (data: { message: string }) => { setStatus(data.message); setQrCode(''); loadChats(); });
-        socket.on('client_ready', (data: { message: string }) => { setStatus(data.message); loadChats(); });
-        socket.on('message', (message: Message) => {
-            const cur = selectedChatRef.current;
-            if (cur && (message.from === cur.id || message.to === cur.id)) {
-                setMessages(prev => [...prev, message]);
-            }
-            if (!message.fromMe) {
-                setChats(prev => {
-                    const idx = prev.findIndex(c => c.id === message.from);
-                    if (idx === -1) return prev;
-                    const updated = { ...prev[idx] };
-                    if (cur?.id !== message.from) updated.unreadCount = (updated.unreadCount ?? 0) + 1;
-                    return [updated, ...prev.filter((_, i) => i !== idx)];
-                });
-            }
-        });
-        socket.on('chats_list',   (list: Chat[]) => setChats(list));
-        socket.on('auth_failure', (data: { message: string }) => { setStatus(`Auth failed: ${data.message}`); setError(data.message); });
-        socket.on('error',        (err: any) => setError(err?.message || 'Socket error'));
-        socket.on('ai_draft', (draft: AIDraft) => {
-            setDrafts(prev => ({ ...prev, [draft.chatId]: draft }));
-            setGeneratingDraft(false);
-            setMultiGenerating(false);
-        });
-
-        socket.on('media', (item: MediaItem) => {
-            setMedia(prev => ({ ...prev, [item.messageId]: item }));
-        });
-
-        socket.on('transcription', (data: { messageId: string; transcript: string }) => {
-            setTranscriptions(prev => ({ ...prev, [data.messageId]: data.transcript }));
-        });
-
-        return () => { socket.disconnect(); };
-    }, []);
-
     // ── Data ──────────────────────────────────────────────────────────────────
 
     const loadChats = async () => {
         try {
             setStatus('Loading chats...');
             const res = await fetch(`${API_BASE_URL}/api/chats`);
+            if (res.status === 503) {
+                // WhatsApp not ready yet — will retry when 'client_ready' fires
+                setStatus('Waiting for WhatsApp…');
+                return;
+            }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             setChats(await res.json());
             setStatus('WhatsApp ready');
         } catch (err: any) { setError(err.message); setStatus('Error loading chats'); }
     };
 
+    const socketRef = useSocket({
+        setStatus, setError, setQrCode, setChats, setMessages,
+        setDrafts, setMedia, setTranscriptions,
+        setGeneratingDraft, setMultiGenerating,
+        selectedChatRef, loadChats,
+    });
+
+    const MEDIA_FETCH_TYPES = new Set(['image', 'audio', 'ptt', 'video', 'sticker', 'document']);
+
     const fetchMediaForMessages = (msgs: Message[]) => {
         msgs
-            .filter(m => m.hasMedia && (m.type === 'image' || m.type === 'audio' || m.type === 'ptt') && m.serializedId)
+            .filter(m => m.hasMedia && MEDIA_FETCH_TYPES.has(m.type) && m.serializedId)
             .forEach(async msg => {
                 try {
                     const res = await fetch(
@@ -178,7 +98,14 @@ function App() {
                     const item = await res.json();
                     setMedia(prev => ({
                         ...prev,
-                        [msg.id]: { messageId: msg.id, from: msg.from, mimetype: item.mimetype, data: item.data },
+                        [msg.id]: {
+                            messageId: msg.id,
+                            from: msg.from,
+                            mimetype: item.mimetype,
+                            data: item.data,
+                            filename: item.filename || null,
+                            isSticker: msg.type === 'sticker',
+                        },
                     }));
                 } catch { /* non-critical */ }
             });
@@ -238,6 +165,60 @@ function App() {
             setChats(prev => prev.map(c => c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c));
             setMessageInput('');
         } catch (err: any) { setError(err.message); }
+    };
+
+    // ── File upload ───────────────────────────────────────────────────────────
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !selectedChat || sendingMedia) return;
+
+        setSendingMedia(true);
+        try {
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const result = reader.result as string;
+                    // strip data:...;base64, prefix
+                    resolve(result.split(',')[1]);
+                };
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch(`${API_BASE_URL}/api/send-media`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: selectedChat.id,
+                    data: base64,
+                    mimetype: file.type,
+                    filename: file.name,
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+
+            // Add optimistic message to chat
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                from: 'me',
+                to: selectedChat.id,
+                body: `📎 ${file.name}`,
+                timestamp: Math.floor(Date.now() / 1000),
+                type: 'document',
+                fromMe: true,
+            }]);
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setSendingMedia(false);
+            // Reset input so re-uploading the same file triggers onChange
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
     // ── Draft actions ─────────────────────────────────────────────────────────
@@ -357,278 +338,60 @@ function App() {
         }
     };
 
-    const formatTimestamp = (ts: number) =>
-        new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
     const currentDraft = selectedChat ? drafts[selectedChat.id] : null;
-    const isMultiPart  = (currentDraft?.parts.length ?? 0) > 1;
 
     return (
         <div className="app">
-            <header className="header">
-                <h1>Zapper</h1>
-                <span className="status-pill">{status}</span>
-                <button
-                    className="btn-logout"
-                    onClick={handleLogout}
-                    disabled={loggingOut}
-                    title="Logout from WhatsApp"
-                >
-                    {loggingOut ? '⏳' : '⏏ Logout'}
-                </button>
-            </header>
-
-            {qrCode && (
-                <div className="qr">
-                    <h3>Scan QR Code</h3>
-                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrCode)}`} alt="QR" />
-                </div>
-            )}
-
-            {error && <div className="error-bar">⚠ {error}</div>}
+            <Header status={status} loggingOut={loggingOut} onLogout={handleLogout} />
+            <QrCode qrCode={qrCode} />
+            <ErrorBar error={error} />
 
             <div className="layout">
-                {/* SIDEBAR */}
-                <div className="sidebar">
+                <Sidebar
+                    chats={chats}
+                    selectedChat={selectedChat}
+                    drafts={drafts}
+                    messageLimit={messageLimit}
+                    setMessageLimit={setMessageLimit}
+                    maxDraftParts={maxDraftParts}
+                    setMaxDraftParts={setMaxDraftParts}
+                    multiSelectMode={multiSelectMode}
+                    toggleMultiSelect={toggleMultiSelect}
+                    selectedChatIds={selectedChatIds}
+                    multiGenerating={multiGenerating}
+                    onGenerateSelected={generateDraftsForSelected}
+                    onSelectChat={handleSelectChat}
+                />
 
-                    {/* Toolbar */}
-                    <div className="sidebar-toolbar">
-                        <div className="limit-control">
-                            <label htmlFor="msg-limit">Msgs</label>
-                            <input
-                                id="msg-limit"
-                                type="number"
-                                min={1}
-                                max={100}
-                                value={messageLimit}
-                                onChange={e => setMessageLimit(Math.max(1, parseInt(e.target.value) || 1))}
-                                title="Number of recent messages sent to the AI as context"
-                            />
-                        </div>
-                        <div className="limit-control">
-                            <label htmlFor="parts-limit">Parts</label>
-                            <input
-                                id="parts-limit"
-                                type="number"
-                                min={1}
-                                max={10}
-                                value={maxDraftParts}
-                                onChange={e => setMaxDraftParts(Math.max(1, parseInt(e.target.value) || 1))}
-                                title="Max number of message parts the AI should split its reply into"
-                            />
-                        </div>
-                        <button
-                            className={`btn-multiselect ${multiSelectMode ? 'active' : ''}`}
-                            onClick={toggleMultiSelect}
-                            title="Select multiple chats to generate drafts"
-                        >
-                            {multiSelectMode ? '✕ Cancel' : '☑ Select'}
-                        </button>
-                    </div>
-
-                    {/* Multi-select action bar */}
-                    {multiSelectMode && (
-                        <div className="multi-generate-bar">
-                            <span className="multi-count">
-                                {selectedChatIds.size === 0
-                                    ? 'Select chats below'
-                                    : `${selectedChatIds.size} chat${selectedChatIds.size > 1 ? 's' : ''} selected`}
-                            </span>
-                            <button
-                                className="btn-generate-multi"
-                                disabled={selectedChatIds.size === 0 || multiGenerating}
-                                onClick={generateDraftsForSelected}
-                            >
-                                {multiGenerating ? '⏳ Generating…' : '🤖 Generate'}
-                            </button>
-                        </div>
-                    )}
-
-                    <div className="chat-list">
-                        {chats.map(chat => (
-                            <div
-                                key={chat.id}
-                                className={[
-                                    'chat-item',
-                                    !multiSelectMode && selectedChat?.id === chat.id ? 'active' : '',
-                                    multiSelectMode && selectedChatIds.has(chat.id) ? 'multi-selected' : '',
-                                ].filter(Boolean).join(' ')}
-                                onClick={() => handleSelectChat(chat)}
-                            >
-                                {multiSelectMode && (
-                                    <div className={`chat-checkbox ${selectedChatIds.has(chat.id) ? 'checked' : ''}`}>
-                                        {selectedChatIds.has(chat.id) && '✓'}
-                                    </div>
-                                )}
-                                <div className="chat-meta">
-                                    <div className="chat-name">{chat.name || chat.id}</div>
-                                    <div className="chat-preview">
-                                        {drafts[chat.id]
-                                            ? `🤖 ${drafts[chat.id].parts.length} part draft ready`
-                                            : 'Click to open'}
-                                    </div>
-                                </div>
-                                <div className="chat-badges">
-                                    {drafts[chat.id] && <span className="badge badge-ai">AI</span>}
-                                    {chat.unreadCount > 0 && <span className="badge">{chat.unreadCount}</span>}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* CHAT AREA */}
-                <div className="chat-area">
-                    {selectedChat && !multiSelectMode ? (
-                        <>
-                            <div className="chat-header">
-                                {selectedChat.name || selectedChat.id}
-                                {loadingHistory && <span className="loading-hint"> Loading…</span>}
-                            </div>
-
-                            <div className="messages">
-                                {messages.map((msg, i) => (
-                                    <div key={msg.id || i} className={`bubble ${msg.fromMe ? 'sent' : 'received'}`}>
-                                        {media[msg.id] && media[msg.id].mimetype.startsWith('image/') && (
-                                            <img
-                                                className="bubble-image"
-                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
-                                                alt="received image"
-                                                onClick={() => setLightbox(media[msg.id])}
-                                            />
-                                        )}
-                                        {media[msg.id] && media[msg.id].mimetype.startsWith('audio/') && (
-                                            <audio
-                                                className="bubble-audio"
-                                                controls
-                                                src={`data:${media[msg.id].mimetype};base64,${media[msg.id].data}`}
-                                            />
-                                        )}
-                                        {transcriptions[msg.id] && (
-                                            <div className="transcription">
-                                                {transcriptions[msg.id]}
-                                            </div>
-                                        )}
-                                        {msg.body && <div>{msg.body}</div>}
-                                        {msg.hasMedia && !media[msg.id] && (
-                                            <div className="media-placeholder">
-                                                {msg.type === 'image'    ? '🖼️ Loading image…'  :
-                                                 msg.type === 'video'    ? '🎥 Video'            :
-                                                 msg.type === 'audio' || msg.type === 'ptt' ? '🎵 Loading audio…' :
-                                                 msg.type === 'document' ? '📄 Document'         :
-                                                 msg.type === 'sticker'  ? '🎨 Sticker'          :
-                                                                           '📎 Media'}
-                                            </div>
-                                        )}
-                                        <span className="time">{formatTimestamp(msg.timestamp)}</span>
-                                    </div>
-                                ))}
-                                <div ref={messagesEndRef} />
-                            </div>
-
-                            {/* ── AI DRAFT BANNER ── */}
-                            {currentDraft && (
-                                <div className="draft-banner">
-                                    <div className="draft-header">
-                                        <span className="draft-label">
-                                            🤖 AI Draft
-                                            {isMultiPart && (
-                                                <span className="draft-parts-badge">
-                                                    {currentDraft.parts.length} parts
-                                                </span>
-                                            )}
-                                        </span>
-                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                            <span className="draft-time">{formatTimestamp(currentDraft.generatedAt)}</span>
-                                            <button className="btn-discard" onClick={() => discardDraft()}>✕ Discard all</button>
-                                        </div>
-                                    </div>
-
-                                    {/* Individual parts */}
-                                    <div className="draft-parts">
-                                        {currentDraft.parts.map((part, idx) => (
-                                            <div key={idx} className="draft-part">
-                                                <div className="draft-part-header">
-                                                    {isMultiPart && (
-                                                        <span className="draft-part-num">Part {idx + 1}</span>
-                                                    )}
-                                                    <button
-                                                        className="btn-part-remove"
-                                                        onClick={() => removePart(currentDraft.chatId, idx)}
-                                                        title="Remove this part"
-                                                    >✕</button>
-                                                </div>
-                                                <textarea
-                                                    className="draft-body draft-body-editable"
-                                                    value={part}
-                                                    onChange={e => updatePart(currentDraft.chatId, idx, e.target.value)}
-                                                    rows={Math.max(2, part.split('\n').length)}
-                                                />
-                                                <div className="draft-part-actions">
-                                                    <button
-                                                        className="btn-send btn-send-part"
-                                                        onClick={() => sendPart(currentDraft.chatId, idx)}
-                                                    >
-                                                        ✅ Send this
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    {/* Global actions */}
-                                    <div className="draft-actions">
-                                        <button className="btn-send" onClick={sendAllParts}>
-                                            {isMultiPart ? `✅ Send all ${currentDraft.parts.length}` : '✅ Send'}
-                                        </button>
-                                        {isMultiPart && (
-                                            <button className="btn-edit" onClick={() => mergeParts(currentDraft.chatId)}>
-                                                ⊕ Merge
-                                            </button>
-                                        )}
-                                        <button className="btn-edit" onClick={editDraft}>✏️ Edit in input</button>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="input-bar">
-                                <input
-                                    value={messageInput}
-                                    onChange={e => setMessageInput(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                                    placeholder="Type a message"
-                                />
-                                <button
-                                    className="btn-generate-single"
-                                    onClick={generateDraftForCurrentChat}
-                                    disabled={generatingDraft}
-                                    title={`Generate AI draft (${maxDraftParts} part${maxDraftParts > 1 ? 's' : ''})`}
-                                >
-                                    {generatingDraft ? '⏳' : '🤖'}
-                                </button>
-                                <button onClick={() => sendMessage()}>Send</button>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="empty">
-                            {multiSelectMode
-                                ? 'Select chats in the sidebar, then click Generate'
-                                : 'Select a chat to start messaging'}
-                        </div>
-                    )}
-                </div>
+                <ChatArea
+                    selectedChat={selectedChat}
+                    multiSelectMode={multiSelectMode}
+                    loadingHistory={loadingHistory}
+                    messages={messages}
+                    media={media}
+                    transcriptions={transcriptions}
+                    currentDraft={currentDraft}
+                    messageInput={messageInput}
+                    setMessageInput={setMessageInput}
+                    sendingMedia={sendingMedia}
+                    generatingDraft={generatingDraft}
+                    maxDraftParts={maxDraftParts}
+                    fileInputRef={fileInputRef}
+                    messagesEndRef={messagesEndRef}
+                    onOpenLightbox={lb => setLightbox(lb)}
+                    onSend={() => sendMessage()}
+                    onFileUpload={handleFileUpload}
+                    onGenerate={generateDraftForCurrentChat}
+                    onDiscardDraft={() => discardDraft()}
+                    onRemovePart={removePart}
+                    onUpdatePart={updatePart}
+                    onMergeParts={mergeParts}
+                    onEditDraft={editDraft}
+                    onSendAllParts={sendAllParts}
+                    onSendPart={sendPart}
+                />
             </div>
-            {/* Lightbox */}
-            {lightbox && (
-                <div className="lightbox" onClick={() => setLightbox(null)}>
-                    <img
-                        src={`data:${lightbox.mimetype};base64,${lightbox.data}`}
-                        alt="full size"
-                        onClick={e => e.stopPropagation()}
-                    />
-                    <button className="lightbox-close" onClick={() => setLightbox(null)}>✕</button>
-                </div>
-            )}
+            <Lightbox lightbox={lightbox} onClose={() => setLightbox(null)} />
         </div>
     );
 }

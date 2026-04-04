@@ -4,8 +4,8 @@ import express from 'express';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
-import { WhatsAppClient } from './client';
-import { MessageHandler } from './handlers/messageHandler';
+import { WhatsAppClient, ALLOWED_MEDIA_TYPES } from './client';
+import { MessageHandler } from './messaging/messageHandler';
 import cors from 'cors';
 
 const app = express();
@@ -30,19 +30,21 @@ const whatsappClient = new WhatsAppClient({
     },
     onMessage: async (message) => {
         io.emit('message', {
-            id:        message.id.id,
-            from:      message.from,
-            to:        message.to,
-            body:      message.body,
-            timestamp: message.timestamp,
-            type:      message.type,
-            fromMe:    message.fromMe,
-            hasMedia:  message.hasMedia,
+            id:           message.id.id,
+            serializedId: message.id._serialized,
+            from:         message.from,
+            to:           message.to,
+            body:         message.body,
+            timestamp:    message.timestamp,
+            type:         message.type,
+            fromMe:       message.fromMe,
+            hasMedia:     message.hasMedia,
         });
 
         await messageHandler.handleMessage(message);
 
-        if (message.hasMedia) {
+        // Emit media for all supported types (image, audio, ptt, video, sticker, document)
+        if (message.hasMedia && message.type !== 'sticker') {
             try {
                 const media = await message.downloadMedia();
                 if (media) {
@@ -51,6 +53,7 @@ const whatsappClient = new WhatsAppClient({
                         from:      message.from,
                         mimetype:  media.mimetype,
                         data:      media.data,
+                        filename:  media.filename || null,
                     });
                 }
             } catch { /* non-critical */ }
@@ -58,13 +61,14 @@ const whatsappClient = new WhatsAppClient({
     },
     onSticker: (stickerInfo) => {
         console.log(`🎨 Sticker received from ${stickerInfo.message.from}`);
-        io.emit('sticker', {
+        io.emit('media', {
+            messageId:  stickerInfo.message.id.id,
             from:       stickerInfo.message.from,
-            isAnimated: stickerInfo.isAnimated,
-            fileSize:   stickerInfo.fileSize,
-            dimensions: stickerInfo.dimensions,
+            mimetype:   stickerInfo.mimeType,
             data:       stickerInfo.data.toString('base64'),
-            savedPath:  stickerInfo.savedPath,
+            filename:   null,
+            isSticker:  true,
+            isAnimated: stickerInfo.isAnimated,
         });
     },
     onAuthFailure: (msg) => {
@@ -97,8 +101,8 @@ const messageHandler = new MessageHandler(
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.use((req, _res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -208,6 +212,27 @@ app.post('/api/send-message', async (req, res) => {
         res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to send message', details: err.message });
+    }
+});
+
+app.post('/api/send-media', async (req, res) => {
+    const { to, data, mimetype, filename, caption } = req.body;
+    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!to || !data || !mimetype || !filename) {
+        return res.status(400).json({ error: 'Missing required fields: to, data, mimetype, filename' });
+    }
+    if (!ALLOWED_MEDIA_TYPES.has(mimetype)) {
+        return res.status(400).json({
+            error: `Unsupported file type: ${mimetype}`,
+            allowed: Array.from(ALLOWED_MEDIA_TYPES),
+        });
+    }
+    try {
+        const result = await whatsappClient.sendMedia(to, data, mimetype, filename, caption);
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
+        res.json({ success: true, message: 'Media sent successfully', id: result.id.id });
+    } catch (err: any) {
+        res.status(500).json({ error: 'Failed to send media', details: err.message });
     }
 });
 
@@ -330,6 +355,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`   GET  /api/chats-with-messages`);
     console.log(`   GET  /api/conversation/:number`);
     console.log(`   POST /api/send-message`);
+    console.log(`   POST /api/send-media`);
     console.log(`   POST /api/generate-drafts`);
     console.log(`\n🤖 Socket events emitted:`);
     console.log(`   ai_draft  — AI draft ready for review`);

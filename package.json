@@ -1,6 +1,6 @@
 {
   "name": "zapper",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -37,6 +37,7 @@
     "webpack-dev-server": "^5.2.3"
   },
   "dependencies": {
+    "chalk": "^4.1.2",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
