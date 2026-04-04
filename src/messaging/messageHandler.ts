@@ -2,7 +2,7 @@ import { Message } from 'whatsapp-web.js';
 import { WhatsAppClient } from '../client';
 import { getLLMClient } from '../llm';
 import { transcribeAudio } from '../transcription/deepgram';
-import { saveDescription } from '../transcription/cache';
+import { saveDescription } from '../transcription/transcription_cache';
 import chalk from 'chalk';
 import {
     POOL_WINDOW_MS,

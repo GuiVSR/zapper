@@ -746,3 +746,360 @@ html, body, #root {
 }
 
 .lightbox-close:hover { background: rgba(255,255,255,0.3); }
+
+/* ── PARTS STEPPER ───────────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f0f2f5;
+  color: #333;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: #dbeafe;
+  color: #1a56a0;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  width: 28px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  line-height: 28px;
+  user-select: none;
+}
+
+/* ── PARTS STEPPER ───────────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f0f2f5;
+  color: #333;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: #dbeafe;
+  color: #1a56a0;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  width: 28px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  line-height: 28px;
+  user-select: none;
+}
+
+/* ── SIDEBAR TOOLBAR CONTAINER (tabs + content) ─────────────────────────── */
+.sidebar-toolbar-container {
+  flex-shrink: 0;
+  border-bottom: 1px solid #ddd;
+  background: white;
+}
+
+/* ── SIDEBAR TABS ────────────────────────────────────────────────────────── */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid #eee;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  background: #f7f8fa;
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.sidebar-tab:first-child { border-right: 1px solid #eee; }
+
+.sidebar-tab:hover:not(.active) {
+  background: #eef1f5;
+  color: #555;
+}
+
+.sidebar-tab.active {
+  background: white;
+  color: #1a56a0;
+  box-shadow: inset 0 -2px 0 #2d7dd2;
+}
+
+/* ── SELECT PANEL ────────────────────────────────────────────────────────── */
+.sidebar-select-panel {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.select-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.select-action-btn {
+  flex: 1;
+  padding: 6px 4px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  color: #444;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.select-action-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.select-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.select-action-count {
+  background: #2d7dd2;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.select-status {
+  font-size: 11px;
+  color: #1e40af;
+  font-weight: 500;
+  text-align: center;
+  padding: 2px 0;
+}
+
+/* ── PARTS STEPPER ───────────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f0f2f5;
+  color: #333;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: #dbeafe;
+  color: #1a56a0;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  width: 28px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  line-height: 28px;
+  user-select: none;
+}
+
+/* ── SIDEBAR TOOLBAR CONTAINER (tabs + content) ─────────────────────────── */
+.sidebar-toolbar-container {
+  flex-shrink: 0;
+  border-bottom: 1px solid #ddd;
+  background: white;
+}
+
+/* ── SIDEBAR TABS ────────────────────────────────────────────────────────── */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid #eee;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  background: #f7f8fa;
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.sidebar-tab:first-child { border-right: 1px solid #eee; }
+
+.sidebar-tab:hover:not(.active) {
+  background: #eef1f5;
+  color: #555;
+}
+
+.sidebar-tab.active {
+  background: white;
+  color: #1a56a0;
+  box-shadow: inset 0 -2px 0 #2d7dd2;
+}
+
+/* ── SELECT PANEL ────────────────────────────────────────────────────────── */
+.sidebar-select-panel {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.select-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.select-action-btn {
+  flex: 1;
+  padding: 6px 4px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  color: #444;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.select-action-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.select-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.select-action-count {
+  background: #2d7dd2;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ── SELECT GENERATE ROW (Parts stepper + Generate button) ───────────────── */
+.select-generate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.select-generate-row .btn-generate-multi {
+  flex: 1;
+}

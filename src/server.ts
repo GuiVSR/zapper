@@ -7,6 +7,7 @@ import path from 'path';
 import { WhatsAppClient, ALLOWED_MEDIA_TYPES } from './client';
 import { MessageHandler } from './messaging/messageHandler';
 import cors from 'cors';
+import { getCachedName, refreshContactNames } from './contacts/contacts_cache';
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,14 @@ const whatsappClient = new WhatsAppClient({
     onReady: () => {
         console.log('✅ WhatsApp client is ready!');
         io.emit('ready', { message: 'WhatsApp is connected and ready!' });
+
+        // Kick off background contact name resolution on startup
+        whatsappClient.getChats().then(chats => {
+            const nonGroupIds = chats
+                .filter(c => !c.isGroup)
+                .map(c => c.id._serialized);
+            refreshContactNames(whatsappClient, nonGroupIds);
+        }).catch(() => {/* non-critical */});
     },
     onMessage: async (message) => {
         io.emit('message', {
@@ -42,6 +51,11 @@ const whatsappClient = new WhatsAppClient({
         });
 
         await messageHandler.handleMessage(message);
+
+        // Trigger a background refresh for the sender — picks up new contacts automatically
+        if (!message.fromMe && !message.from.includes('-')) {
+            refreshContactNames(whatsappClient, [message.from]);
+        }
 
         // Emit media for all supported types (image, audio, ptt, video, sticker, document)
         if (message.hasMedia && message.type !== 'sticker') {
@@ -127,14 +141,28 @@ app.get('/api/chats', async (_req, res) => {
     }
     try {
         const chats = await whatsappClient.getChats();
+
+        // Trigger background refresh for any non-group chats not yet cached
+        const nonGroupIds = chats
+            .filter(c => !c.isGroup)
+            .map(c => c.id._serialized);
+        refreshContactNames(whatsappClient, nonGroupIds);
+
         res.json(
-            chats.map(chat => ({
-                id:          chat.id._serialized,
-                name:        chat.name || chat.id.user || 'Unknown',
-                isGroup:     chat.isGroup,
-                unreadCount: chat.unreadCount,
-                timestamp:   chat.timestamp,
-            }))
+            chats.map(chat => {
+                // Use cached contact name if available (resolved in background)
+                const cachedName = !chat.isGroup
+                    ? getCachedName(chat.id._serialized)
+                    : undefined;
+
+                return {
+                    id:          chat.id._serialized,
+                    name:        cachedName || chat.name || chat.id.user || 'Unknown',
+                    isGroup:     chat.isGroup,
+                    unreadCount: chat.unreadCount,
+                    timestamp:   chat.timestamp,
+                };
+            })
         );
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chats', details: err.message });

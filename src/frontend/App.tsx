@@ -8,8 +8,8 @@ import { Header } from './components/Header';
 import { QrCode } from './components/QrCode';
 import { ErrorBar } from './components/ErrorBar';
 import { Lightbox } from './components/Lightbox';
-import { Sidebar } from './components/Sidebar/Sidebar';
 import { ChatArea } from './components/ChatArea/ChatArea';
+import { Sidebar } from './components/Sidebar/Sidebar';
 
 function App() {
     const [messages, setMessages]           = useState<Message[]>([]);
@@ -358,6 +358,7 @@ function App() {
                     multiSelectMode={multiSelectMode}
                     toggleMultiSelect={toggleMultiSelect}
                     selectedChatIds={selectedChatIds}
+                    setSelectedChatIds={setSelectedChatIds}
                     multiGenerating={multiGenerating}
                     onGenerateSelected={generateDraftsForSelected}
                     onSelectChat={handleSelectChat}
