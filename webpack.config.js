@@ -41,7 +41,7 @@ module.exports = {
         proxy: [
             {
                 context: ['/socket.io', '/api'],
-                target: 'http://localhost:3000',
+                target: 'http://localhost:3002',
                 ws: true,
                 changeOrigin: true,
                 secure: false

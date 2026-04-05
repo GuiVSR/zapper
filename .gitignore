@@ -1,5 +1,6 @@
 .wwebjs_auth
 .wwebjs_cache
+.openclaude-profile.json
 node_modules
 dist
 .env

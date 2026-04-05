@@ -10,6 +10,7 @@ import cors from 'cors';
 import { testConnection, closePool } from './db';
 import { createSession, closeSession } from './db';
 import { createPromptLog, updatePromptAction, createPartAction } from './db';
+import { getCachedName, refreshContactNames } from './contacts/contacts_cache';
 
 const app = express();
 const server = http.createServer(app);
@@ -46,6 +47,14 @@ const whatsappClient = new WhatsAppClient({
             currentSessionId = session.id;
             console.log(`[DB] Session created: ${currentSessionId}`);
         }
+
+        // Kick off background contact name resolution on startup
+        whatsappClient.getChats().then(chats => {
+            const nonGroupIds = chats
+                .filter(c => !c.isGroup)
+                .map(c => c.id._serialized);
+            refreshContactNames(whatsappClient, nonGroupIds);
+        }).catch(() => {/* non-critical */});
     },
     onMessage: async (message) => {
         io.emit('message', {
@@ -62,7 +71,12 @@ const whatsappClient = new WhatsAppClient({
 
         await messageHandler.handleMessage(message);
 
-        // Emite mídia para todos os tipos suportados
+        // Trigger a background refresh for the sender — picks up new contacts automatically
+        if (!message.fromMe && !message.from.includes('-')) {
+            refreshContactNames(whatsappClient, [message.from]);
+        }
+
+        // Emit media for all supported types (image, audio, ptt, video, sticker, document)
         if (message.hasMedia && message.type !== 'sticker') {
             try {
                 const media = await message.downloadMedia();
@@ -115,7 +129,7 @@ const messageHandler = new MessageHandler(
     whatsappClient,
     process.env.WEBHOOK_URL,
     // onDraft — chamado sempre que a IA gera um draft (pool automático ou sob demanda)
-    async (draft) => {
+    async (draft: import('./messaging/types').AIDraft) => {
         console.log(`[Server] Emitting ai_draft for chat ${draft.chatId} (${draft.parts.length} part(s))`);
 
         // Persiste o draft no banco e guarda o ID para uso posterior
@@ -181,14 +195,28 @@ app.get('/api/chats', async (_req, res) => {
     }
     try {
         const chats = await whatsappClient.getChats();
+
+        // Trigger background refresh for any non-group chats not yet cached
+        const nonGroupIds = chats
+            .filter(c => !c.isGroup)
+            .map(c => c.id._serialized);
+        refreshContactNames(whatsappClient, nonGroupIds);
+
         res.json(
-            chats.map(chat => ({
-                id:          chat.id._serialized,
-                name:        chat.name || chat.id.user || 'Unknown',
-                isGroup:     chat.isGroup,
-                unreadCount: chat.unreadCount,
-                timestamp:   chat.timestamp,
-            }))
+            chats.map(chat => {
+                // Use cached contact name if available (resolved in background)
+                const cachedName = !chat.isGroup
+                    ? getCachedName(chat.id._serialized)
+                    : undefined;
+
+                return {
+                    id:          chat.id._serialized,
+                    name:        cachedName || chat.name || chat.id.user || 'Unknown',
+                    isGroup:     chat.isGroup,
+                    unreadCount: chat.unreadCount,
+                    timestamp:   chat.timestamp,
+                };
+            })
         );
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chats', details: err.message });

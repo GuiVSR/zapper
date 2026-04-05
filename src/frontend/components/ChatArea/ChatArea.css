@@ -1,0 +1,132 @@
+/* CHAT AREA */
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #e5ddd5;
+  overflow: hidden;
+}
+
+/* CHAT HEADER */
+.chat-header {
+  background: white;
+  padding: 15px;
+  border-bottom: 1px solid #ddd;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.loading-hint {
+  font-weight: 400;
+  font-size: 13px;
+  color: #888;
+}
+
+/* MESSAGES */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* BUBBLES */
+.bubble {
+  max-width: 60%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  position: relative;
+  font-size: 14px;
+}
+
+.bubble.sent     { align-self: flex-end;   background: #dbeafe; }
+.bubble.received { align-self: flex-start; background: white;   }
+
+.time {
+  font-size: 10px;
+  color: #666;
+  display: block;
+  text-align: right;
+  margin-top: 5px;
+}
+
+/* INPUT */
+.input-bar {
+  display: flex;
+  padding: 10px;
+  background: white;
+  border-top: 1px solid #ddd;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.input-bar input[type="text"],
+.input-bar input:not([type]) {
+  flex: 1;
+  padding: 10px;
+  border-radius: 20px;
+  border: 1px solid #ddd;
+  outline: none;
+}
+
+.input-bar > button:last-child {
+  margin-left: 10px;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 20px;
+  background: #2d7dd2;
+  color: white;
+  cursor: pointer;
+}
+
+.input-bar > button:last-child:hover { background: #1a56a0; }
+
+/* EMPTY */
+.empty {
+  margin: auto;
+  color: #666;
+}
+
+/* ── ON-DEMAND GENERATE BUTTON (input bar) ───────────────────────────────── */
+.btn-generate-single {
+  margin-left: 6px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #2d7dd2;
+  border-radius: 50%;
+  background: white;
+  color: #2d7dd2;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-generate-single:hover:not(:disabled) { background: #dbeafe; }
+.btn-generate-single:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── ATTACH BUTTON (input bar) ───────────────────────────────────────────── */
+.btn-attach {
+  margin-left: 6px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #2d7dd2;
+  border-radius: 50%;
+  background: white;
+  color: #2d7dd2;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-attach:hover:not(:disabled) { background: #dbeafe; }
+.btn-attach:disabled { opacity: 0.5; cursor: not-allowed; }

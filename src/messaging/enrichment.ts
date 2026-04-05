@@ -6,7 +6,7 @@
 import { WhatsAppClient, MessageHistory } from '../client';
 import { getLLMClient } from '../llm';
 import { transcribeAudio } from '../transcription/deepgram';
-import { saveDescription, getDescriptions } from '../transcription/cache';
+import { saveDescription, getDescriptions } from '../transcription/transcription_cache';
 import chalk from 'chalk';
 import { PooledMessage } from './types';
 
