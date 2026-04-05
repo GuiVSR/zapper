@@ -1,5 +1,6 @@
 import React from 'react';
 import { Chat, AIDraft } from '../../types';
+import './Sidebar.css';
 
 interface ChatListProps {
     chats: Chat[];
@@ -25,17 +26,19 @@ export function ChatList({
                     ].filter(Boolean).join(' ')}
                     onClick={() => onSelectChat(chat)}
                 >
-                    {multiSelectMode && (
-                        <div className={`chat-checkbox ${selectedChatIds.has(chat.id) ? 'checked' : ''}`}>
-                            {selectedChatIds.has(chat.id) && '✓'}
-                        </div>
-                    )}
-                    <div className="chat-meta">
-                        <div className="chat-name">{chat.name || chat.id}</div>
-                        <div className="chat-preview">
-                            {drafts[chat.id]
-                                ? `🤖 ${drafts[chat.id].parts.length} part draft ready`
-                                : 'Click to open'}
+                    <div className="chat-item-left">
+                        {multiSelectMode && (
+                            <div className={`chat-checkbox ${selectedChatIds.has(chat.id) ? 'checked' : ''}`}>
+                                {selectedChatIds.has(chat.id) && '✓'}
+                            </div>
+                        )}
+                        <div className="chat-meta">
+                            <div className="chat-name">{chat.name || chat.id}</div>
+                            <div className="chat-preview">
+                                {drafts[chat.id]
+                                    ? `🤖 ${drafts[chat.id].parts.length} part draft ready`
+                                    : 'Click to open'}
+                            </div>
                         </div>
                     </div>
                     <div className="chat-badges">

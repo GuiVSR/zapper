@@ -4,6 +4,7 @@ import { ChatHeader } from './ChatHeader';
 import { MessageBubble } from './MessageBubble';
 import { DraftBanner } from './DraftBanner';
 import { InputBar } from './InputBar';
+import './ChatArea.css';
 
 interface ChatAreaProps {
     selectedChat: Chat | null;

@@ -1,4 +1,5 @@
 import React from 'react';
+import '../App.global.css';
 
 interface QrCodeProps {
     qrCode: string;

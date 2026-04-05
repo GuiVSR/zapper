@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev:server": "ts-node --compiler-options '{\"ignoreDeprecations\":\"6.0\"}' src/server.ts",
+    "dev:server": "ts-node src/server.ts",
     "dev:frontend": "webpack serve --config webpack.config.js --mode development",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:frontend\"",
     "build:frontend": "webpack --config webpack.config.js --mode production",

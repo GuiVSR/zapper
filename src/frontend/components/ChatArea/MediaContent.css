@@ -1,0 +1,189 @@
+/* ── IMAGE BUBBLES ───────────────────────────────────────────────────────── */
+.bubble-image {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+
+/* ── STICKER BUBBLES ─────────────────────────────────────────────────────── */
+.bubble-sticker {
+  display: block;
+  max-width: 160px;
+  max-height: 160px;
+  object-fit: contain;
+}
+
+/* ── VIDEO BUBBLES ───────────────────────────────────────────────────────── */
+.bubble-video-container {
+  position: relative;
+  cursor: pointer;
+  display: inline-block;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.bubble-video {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.video-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  font-size: 36px;
+  pointer-events: none;
+  transition: background 0.15s;
+}
+
+.bubble-video-container:hover .video-play-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* ── AUDIO BUBBLES ───────────────────────────────────────────────────────── */
+.bubble-audio {
+  display: block;
+  width: 100%;
+  min-width: 250px;
+  max-width: 320px;
+  height: 54px;
+  margin-bottom: 4px;
+  border-radius: 24px;
+}
+
+/* ── DOCUMENT BUBBLES ────────────────────────────────────────────────────── */
+.bubble-document {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f0f2f5;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 0.15s;
+  min-width: 200px;
+}
+
+.bubble.sent .bubble-document {
+  background: #c4dbf6;
+}
+
+.bubble-document:hover {
+  background: #e2e5e9;
+}
+
+.bubble.sent .bubble-document:hover {
+  background: #aecdf0;
+}
+
+.doc-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.doc-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-size {
+  font-size: 11px;
+  color: #888;
+}
+
+.doc-download {
+  font-size: 18px;
+  color: #2d7dd2;
+  flex-shrink: 0;
+}
+
+/* ── TRANSCRIPTION ───────────────────────────────────────────────────────── */
+.transcription {
+  font-size: 12px;
+  color: #555;
+  font-style: italic;
+  padding: 2px 0 4px;
+  border-top: 1px solid #e0e0e0;
+  margin-top: 4px;
+}
+
+.media-placeholder {
+  font-size: 13px;
+  color: #888;
+  padding: 4px 0;
+}
+
+/* ── LIGHTBOX ────────────────────────────────────────────────────────────── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  object-fit: contain;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+
+.lightbox-video {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  object-fit: contain;
+  cursor: default;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  outline: none;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: white;
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.lightbox-close:hover { background: rgba(255,255,255,0.3); }

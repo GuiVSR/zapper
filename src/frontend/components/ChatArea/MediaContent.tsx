@@ -1,6 +1,7 @@
 import React from 'react';
 import { Message, MediaItem } from '../../types';
 import { getFileIcon, formatFileSize, downloadDocument } from '../../utils/fileHelpers';
+import './MediaContent.css';
 
 interface MediaContentProps {
     msg: Message;

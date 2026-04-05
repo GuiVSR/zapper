@@ -2,6 +2,7 @@ import React from 'react';
 import { Chat, AIDraft } from '../../types';
 import { SidebarToolbar } from './SidebarToolbar';
 import { ChatList } from './ChatList';
+import './Sidebar.css';
 
 interface SidebarProps {
     chats: Chat[];

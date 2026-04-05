@@ -1,4 +1,5 @@
 import React from 'react';
+import './Sidebar.css';
 
 interface SidebarToolbarProps {
     messageLimit: number;
@@ -71,14 +72,17 @@ export function SidebarToolbar({
                             disabled={unreadCount === 0}
                             title={`Select ${unreadCount} chat(s) with unread messages`}
                         >
-                            🔵 Unread{unreadCount > 0 && <span className="select-action-count">{unreadCount}</span>}
+                            <span className="select-action-emoji">🔵</span>
+                            <span className="select-action-label">Unread</span>
+                            {unreadCount > 0 && <span className="select-action-count">{unreadCount}</span>}
                         </button>
                         <button
                             className="select-action-btn"
                             onClick={onSelectAll}
                             title={`Select all ${chatCount} chats`}
                         >
-                            ✅ All
+                            <span className="select-action-emoji">✅</span>
+                            <span className="select-action-label">All</span>
                         </button>
                         <button
                             className="select-action-btn"
@@ -86,7 +90,8 @@ export function SidebarToolbar({
                             disabled={selectedCount === 0}
                             title="Clear selection"
                         >
-                            ✕ None
+                            <span className="select-action-emoji">✕</span>
+                            <span className="select-action-label">None</span>
                         </button>
                     </div>
 

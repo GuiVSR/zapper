@@ -1,4 +1,5 @@
 import React from 'react';
+import './ChatArea/MediaContent.css';
 
 interface LightboxProps {
     lightbox: { mimetype: string; data: string } | null;

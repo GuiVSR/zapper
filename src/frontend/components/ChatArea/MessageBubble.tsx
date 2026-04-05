@@ -2,6 +2,8 @@ import React from 'react';
 import { Message, MediaItem } from '../../types';
 import { formatTimestamp } from '../../utils/formatTimestamp';
 import { MediaContent } from './MediaContent';
+import './ChatArea.css';
+import './MediaContent.css';
 
 interface MessageBubbleProps {
     msg: Message;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import './App.css';
+import './App.global.css';
 import { API_BASE_URL, HISTORY_CONTEXT, DEFAULT_MAX_DRAFT_PARTS } from '../constants';
 import { Message, Chat, AIDraft, MediaItem } from './types';
 import { updateFavicon } from './utils/favicon';
