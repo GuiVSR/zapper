@@ -9,13 +9,25 @@ interface ChatListProps {
     selectedChatIds: Set<string>;
     drafts: Record<string, AIDraft>;
     onSelectChat: (chat: Chat) => void;
+    // paginação
+    loadingChats: boolean;
+    hasMoreChats: boolean;
+    onLoadMoreChats: () => void;
 }
 
 export function ChatList({
     chats, selectedChat, multiSelectMode, selectedChatIds, drafts, onSelectChat,
+    loadingChats, hasMoreChats, onLoadMoreChats,
 }: ChatListProps) {
     return (
         <div className="chat-list">
+            {/* Indicador de carregamento inicial (lista ainda vazia) */}
+            {loadingChats && chats.length === 0 && (
+                <div className="chat-list-loading">
+                    ⏳ Loading chats…
+                </div>
+            )}
+
             {chats.map(chat => (
                 <div
                     key={chat.id}
@@ -47,6 +59,24 @@ export function ChatList({
                     </div>
                 </div>
             ))}
+
+            {/* Botão "Load more" — aparece só quando há mais chats disponíveis */}
+            {hasMoreChats && (
+                <button
+                    className="btn-load-more"
+                    onClick={onLoadMoreChats}
+                    disabled={loadingChats}
+                >
+                    {loadingChats ? '⏳ Loading…' : '↓ Load more chats'}
+                </button>
+            )}
+
+            {/* Spinner inline quando está carregando mais (lista já tem itens) */}
+            {loadingChats && chats.length > 0 && (
+                <div className="chat-list-loading-more">
+                    ⏳ Loading…
+                </div>
+            )}
         </div>
     );
 }

@@ -333,3 +333,36 @@
 
 .btn-generate-multi:hover:not(:disabled) { background: #1a56a0; }
 .btn-generate-multi:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── LOAD MORE BUTTON ────────────────────────────────────────────────────── */
+.btn-load-more {
+  width: 100%;
+  padding: 11px 0;
+  border: none;
+  border-top: 1px solid #eee;
+  background: white;
+  color: #2d7dd2;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-load-more:hover:not(:disabled) { background: #eff6ff; }
+.btn-load-more:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── CHAT LIST LOADING STATES ────────────────────────────────────────────── */
+.chat-list-loading {
+  padding: 24px 0;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+}
+
+.chat-list-loading-more {
+  padding: 10px 0;
+  text-align: center;
+  color: #aaa;
+  font-size: 12px;
+}

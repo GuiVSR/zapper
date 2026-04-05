@@ -22,13 +22,24 @@ const io = new SocketServer(server, {
 });
 
 // ── Sessão DB ─────────────────────────────────────────────────────────────────
-// Guarda o ID da sessão ativa no banco. Criado no onReady, fechado no onDisconnected.
 let currentSessionId: string | null = null;
 
 // ── Mapa de prompt log IDs ────────────────────────────────────────────────────
-// Associa o chatId ao último promptLogId gerado, para que o endpoint
-// /api/draft-action consiga registrar a ação (sent/edited/discarded).
 const pendingPromptLogIds = new Map<string, string>();
+
+// ── Startup draft suppression ─────────────────────────────────────────────────
+// Ao conectar, o whatsapp-web.js replaya todas as mensagens recentes do histórico
+// como eventos 'message'. Sem esta janela, o pooler geraria drafts para conversas
+// já lidas/respondidas antes do operador sequer abrir o app.
+//
+// Funcionamento: quando onReady dispara, gravamos um timestamp futuro em
+// `startupSuppressUntil`. O callback onDraft verifica esse timestamp e descarta
+// silenciosamente qualquer draft gerado antes de ele expirar.
+//
+// STARTUP_QUIET_MS: tempo em ms após o onReady em que drafts são suprimidos.
+// 15s cobre a maioria das contas. Aumente para contas com muitas mensagens.
+const STARTUP_QUIET_MS = 15_000;
+let startupSuppressUntil = 0; // epoch ms — 0 = sem supressão ativa
 
 // ── WhatsApp client ───────────────────────────────────────────────────────────
 const whatsappClient = new WhatsAppClient({
@@ -41,6 +52,10 @@ const whatsappClient = new WhatsAppClient({
         console.log('✅ WhatsApp client is ready!');
         io.emit('ready', { message: 'WhatsApp is connected and ready!' });
 
+        // Ativa a janela de supressão de drafts
+        startupSuppressUntil = Date.now() + STARTUP_QUIET_MS;
+        console.log(`[Pooler] 🔕 Draft generation suppressed for ${STARTUP_QUIET_MS / 1000}s (startup sync window)`);
+
         // Cria uma nova sessão no banco a cada reconexão
         const session = await createSession({ meta: { node_env: process.env.NODE_ENV } });
         if (session) {
@@ -48,7 +63,7 @@ const whatsappClient = new WhatsAppClient({
             console.log(`[DB] Session created: ${currentSessionId}`);
         }
 
-        // Kick off background contact name resolution on startup
+        // Kick off background contact name resolution
         whatsappClient.getChats().then(chats => {
             const nonGroupIds = chats
                 .filter(c => !c.isGroup)
@@ -71,12 +86,10 @@ const whatsappClient = new WhatsAppClient({
 
         await messageHandler.handleMessage(message);
 
-        // Trigger a background refresh for the sender — picks up new contacts automatically
         if (!message.fromMe && !message.from.includes('-')) {
             refreshContactNames(whatsappClient, [message.from]);
         }
 
-        // Emit media for all supported types (image, audio, ptt, video, sticker, document)
         if (message.hasMedia && message.type !== 'sticker') {
             try {
                 const media = await message.downloadMedia();
@@ -112,7 +125,6 @@ const whatsappClient = new WhatsAppClient({
         console.log('❌ Disconnected:', reason);
         io.emit('disconnected', { reason });
 
-        // Fecha a sessão ativa no banco
         if (currentSessionId) {
             await closeSession(currentSessionId);
             currentSessionId = null;
@@ -128,11 +140,16 @@ const whatsappClient = new WhatsAppClient({
 const messageHandler = new MessageHandler(
     whatsappClient,
     process.env.WEBHOOK_URL,
-    // onDraft — chamado sempre que a IA gera um draft (pool automático ou sob demanda)
+    // onDraft — verifica a janela de supressão antes de emitir qualquer draft
     async (draft: import('./messaging/types').AIDraft) => {
+        if (Date.now() < startupSuppressUntil) {
+            const remainingSec = Math.ceil((startupSuppressUntil - Date.now()) / 1000);
+            console.log(`[Pooler] 🔕 Draft suppressed during startup (${remainingSec}s remaining) — chat: ${draft.chatId}`);
+            return;
+        }
+
         console.log(`[Server] Emitting ai_draft for chat ${draft.chatId} (${draft.parts.length} part(s))`);
 
-        // Persiste o draft no banco e guarda o ID para uso posterior
         const promptLogId = await createPromptLog({
             session_id:             currentSessionId,
             chat_id:                draft.chatId,
@@ -150,16 +167,12 @@ const messageHandler = new MessageHandler(
         });
 
         if (promptLogId) {
-            // Guarda o ID associado ao chat para que /api/draft-action consiga
-            // registrar a ação quando o usuário interagir com o draft
             pendingPromptLogIds.set(draft.chatId, promptLogId);
             console.log(`[DB] prompt_log saved: ${promptLogId}`);
         }
 
-        // Emite o draft para o frontend, incluindo o promptLogId
         io.emit('ai_draft', { ...draft, promptLogId });
     },
-    // onTranscription
     (data) => {
         console.log(`[Server] Emitting transcription for message ${data.messageId}`);
         io.emit('transcription', data);
@@ -183,32 +196,40 @@ app.get('/api/test', (_req, res) => {
 
 app.get('/api/status', (_req, res) => {
     res.json({
-        ready:     whatsappClient.isReady(),
-        sessionId: currentSessionId,
-        timestamp: new Date().toISOString(),
+        ready:             whatsappClient.isReady(),
+        sessionId:         currentSessionId,
+        startupSuppressed: Date.now() < startupSuppressUntil,
+        timestamp:         new Date().toISOString(),
     });
 });
 
-app.get('/api/chats', async (_req, res) => {
+// ── GET /api/chats ────────────────────────────────────────────────────────────
+// Suporta paginação via ?limit=N&offset=N.
+// Resposta inclui `total` e `hasMore` para o frontend controlar o botão
+// "Load more".
+const CHATS_PAGE_SIZE = 30;
+
+app.get('/api/chats', async (req, res) => {
     if (!whatsappClient.isReady()) {
         return res.status(503).json({ error: 'WhatsApp client not ready' });
     }
     try {
-        const chats = await whatsappClient.getChats();
+        const limit  = Math.min(parseInt(req.query.limit  as string) || CHATS_PAGE_SIZE, 200);
+        const offset = parseInt(req.query.offset as string) || 0;
 
-        // Trigger background refresh for any non-group chats not yet cached
-        const nonGroupIds = chats
-            .filter(c => !c.isGroup)
-            .map(c => c.id._serialized);
+        const allChats = await whatsappClient.getChats();
+        const total    = allChats.length;
+        const page     = allChats.slice(offset, offset + limit);
+
+        // Dispara refresh de nomes em background só para os chats da página atual
+        const nonGroupIds = page.filter(c => !c.isGroup).map(c => c.id._serialized);
         refreshContactNames(whatsappClient, nonGroupIds);
 
-        res.json(
-            chats.map(chat => {
-                // Use cached contact name if available (resolved in background)
+        res.json({
+            chats: page.map(chat => {
                 const cachedName = !chat.isGroup
                     ? getCachedName(chat.id._serialized)
                     : undefined;
-
                 return {
                     id:          chat.id._serialized,
                     name:        cachedName || chat.name || chat.id.user || 'Unknown',
@@ -216,8 +237,12 @@ app.get('/api/chats', async (_req, res) => {
                     unreadCount: chat.unreadCount,
                     timestamp:   chat.timestamp,
                 };
-            })
-        );
+            }),
+            total,
+            offset,
+            limit,
+            hasMore: offset + limit < total,
+        });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chats', details: err.message });
     }
@@ -354,8 +379,8 @@ app.post('/api/generate-drafts', async (req, res) => {
     if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
     if (!Array.isArray(chatIds) || chatIds.length === 0) return res.status(400).json({ error: 'Missing or empty "chatIds" array' });
 
-    const messageLimit = typeof limit         === 'number' && limit         > 0  ? limit         : 10;
-    const partsLimit   = typeof maxDraftParts  === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
+    const messageLimit = typeof limit        === 'number' && limit        > 0  ? limit        : 10;
+    const partsLimit   = typeof maxDraftParts === 'number' && maxDraftParts >= 1 ? maxDraftParts : undefined;
 
     messageHandler.generateDraftsForChats(chatIds, messageLimit, partsLimit)
         .catch(err => console.error('[Server] generate-drafts error:', err));
@@ -363,32 +388,14 @@ app.post('/api/generate-drafts', async (req, res) => {
     res.json({ accepted: chatIds.length, limit: messageLimit, maxDraftParts: partsLimit });
 });
 
-// ── /api/draft-action ─────────────────────────────────────────────────────────
-// Registra o que o usuário fez com um draft gerado pela IA.
-//
-// Body esperado:
-// {
-//   promptLogId : string,           // UUID do prompt_log (vem no evento ai_draft)
-//   chatId      : string,           // ID do chat (fallback para buscar o ID)
-//   action      : 'sent' | 'edited' | 'discarded' | 'partial',
-//   sentParts   : string[],         // partes efetivamente enviadas (pode ser [])
-//   originalParts: string[],        // partes originais do draft
-//   partActions?: Array<{           // detalhe por parte (opcional, para 'partial')
-//     partIndex    : number,
-//     originalText : string,
-//     finalText    : string | null,
-//     action       : 'sent' | 'edited' | 'discarded',
-//   }>
-// }
 app.post('/api/draft-action', async (req, res) => {
     const { promptLogId, chatId, action, sentParts, originalParts, partActions } = req.body;
 
-    // Resolve o promptLogId — pode vir no body ou estar no mapa em memória
     const resolvedId: string | undefined =
         promptLogId ?? (chatId ? pendingPromptLogIds.get(chatId) : undefined);
 
     if (!resolvedId) {
-        return res.status(400).json({ error: 'promptLogId not found. Pass it in the body or ensure the draft was generated in this session.' });
+        return res.status(400).json({ error: 'promptLogId not found.' });
     }
 
     if (!action || !['sent', 'edited', 'discarded', 'partial'].includes(action)) {
@@ -396,19 +403,17 @@ app.post('/api/draft-action', async (req, res) => {
     }
 
     try {
-        const parts: string[]         = Array.isArray(sentParts)    ? sentParts    : [];
-        const originals: string[]     = Array.isArray(originalParts) ? originalParts : [];
+        const parts: string[]     = Array.isArray(sentParts)     ? sentParts     : [];
+        const originals: string[] = Array.isArray(originalParts) ? originalParts : [];
 
-        // Detecta quais partes foram editadas comparando texto a texto
         const editedIndices: number[] = parts.reduce<number[]>((acc, text, idx) => {
             if (originals[idx] !== undefined && text !== originals[idx]) acc.push(idx);
             return acc;
         }, []);
 
-        const wasEdited  = editedIndices.length > 0;
-        const sentText   = parts.join('\n\n') || null;
+        const wasEdited = editedIndices.length > 0;
+        const sentText  = parts.join('\n\n') || null;
 
-        // Atualiza o registro principal
         await updatePromptAction(resolvedId, {
             action,
             sent_text:           sentText,
@@ -419,7 +424,6 @@ app.post('/api/draft-action', async (req, res) => {
             action_at:           new Date(),
         });
 
-        // Registra o detalhe por parte (se fornecido ou se for ação partial/multi-parte)
         if (Array.isArray(partActions) && partActions.length > 0) {
             for (const pa of partActions) {
                 await createPartAction({
@@ -433,14 +437,13 @@ app.post('/api/draft-action', async (req, res) => {
             }
         }
 
-        // Remove do mapa de pendentes após a ação ser registrada
         if (chatId) pendingPromptLogIds.delete(chatId);
 
         console.log(`[DB] draft-action recorded — promptLogId: ${resolvedId}, action: ${action}, edited: ${wasEdited}`);
 
         res.json({
-            success:     true,
-            promptLogId: resolvedId,
+            success:           true,
+            promptLogId:       resolvedId,
             action,
             wasEdited,
             editedPartIndices: editedIndices,
@@ -464,7 +467,6 @@ app.use((req, res, next) => {
 // ── WhatsApp + DB init ────────────────────────────────────────────────────────
 console.log('🚀 Starting WhatsApp client...');
 
-// Testa a conexão com o Supabase antes de aceitar conexões WhatsApp
 testConnection().then(ok => {
     if (!ok) console.warn('⚠️  Continuing without DB — prompt logs will not be saved.');
 });
@@ -517,7 +519,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// ── Start — bind to all interfaces so LAN access works ───────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = SERVER_PORT;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
@@ -526,7 +528,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n📱 API endpoints:`);
     console.log(`   GET  /api/test`);
     console.log(`   GET  /api/status`);
-    console.log(`   GET  /api/chats`);
+    console.log(`   GET  /api/chats?limit=30&offset=0`);
     console.log(`   GET  /api/history/:chatId`);
     console.log(`   GET  /api/search?q=query`);
     console.log(`   GET  /api/chats-with-messages`);

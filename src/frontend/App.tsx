@@ -32,10 +32,12 @@ async function recordDraftAction(payload: {
             body: JSON.stringify(payload),
         });
     } catch (err) {
-        // Não bloqueia o fluxo principal — logging apenas
         console.warn('[draft-action] Failed to record:', err);
     }
 }
+
+// ── Pagination constants ──────────────────────────────────────────────────────
+const CHATS_PAGE_SIZE = 30;
 
 function App() {
     const [messages, setMessages]           = useState<Message[]>([]);
@@ -51,6 +53,11 @@ function App() {
     const [media, setMedia]                 = useState<Record<string, MediaItem>>({});
     const [lightbox, setLightbox]           = useState<{ mimetype: string; data: string } | null>(null);
     const [transcriptions, setTranscriptions] = useState<Record<string, string>>({});
+
+    // Paginação de chats
+    const [chatsOffset, setChatsOffset]     = useState(0);
+    const [hasMoreChats, setHasMoreChats]   = useState(false);
+    const [loadingChats, setLoadingChats]   = useState(false);
 
     // Multi-select
     const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -88,26 +95,62 @@ function App() {
 
     // ── Data ──────────────────────────────────────────────────────────────────
 
-    const loadChats = async () => {
+    /**
+     * Carrega uma página de chats do servidor.
+     * - `reset=true`  → primeira carga ou refresh: substitui a lista e reseta o offset
+     * - `reset=false` → "Load more": acrescenta à lista existente
+     */
+    const loadChats = async (reset = true) => {
+        if (loadingChats) return;
+        setLoadingChats(true);
+
+        const offset = reset ? 0 : chatsOffset;
+
         try {
-            setStatus('Loading chats...');
-            const res = await fetch(`${API_BASE_URL}/api/chats`);
+            if (reset) setStatus('Loading chats...');
+            const res = await fetch(`${API_BASE_URL}/api/chats?limit=${CHATS_PAGE_SIZE}&offset=${offset}`);
+
             if (res.status === 503) {
-                // WhatsApp not ready yet — will retry when 'client_ready' fires
                 setStatus('Waiting for WhatsApp…');
+                setLoadingChats(false);
                 return;
             }
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setChats(await res.json());
-            setStatus('WhatsApp ready');
-        } catch (err: any) { setError(err.message); setStatus('Error loading chats'); }
+
+            const data = await res.json();
+            const incoming: Chat[] = data.chats;
+
+            if (reset) {
+                setChats(incoming);
+                setChatsOffset(incoming.length);
+            } else {
+                setChats(prev => {
+                    // Evita duplicatas caso um chat já tenha chegado via socket
+                    const existingIds = new Set(prev.map(c => c.id));
+                    const fresh = incoming.filter(c => !existingIds.has(c.id));
+                    return [...prev, ...fresh];
+                });
+                setChatsOffset(prev => prev + incoming.length);
+            }
+
+            setHasMoreChats(data.hasMore ?? false);
+            if (reset) setStatus('WhatsApp ready');
+        } catch (err: any) {
+            setError(err.message);
+            if (reset) setStatus('Error loading chats');
+        } finally {
+            setLoadingChats(false);
+        }
     };
+
+    const loadMoreChats = () => loadChats(false);
 
     const socketRef = useSocket({
         setStatus, setError, setQrCode, setChats, setMessages,
         setDrafts, setMedia, setTranscriptions,
         setGeneratingDraft, setMultiGenerating,
-        selectedChatRef, loadChats,
+        selectedChatRef,
+        loadChats: () => loadChats(true),
     });
 
     const MEDIA_FETCH_TYPES = new Set(['image', 'audio', 'ptt', 'video', 'sticker', 'document']);
@@ -262,8 +305,6 @@ function App() {
         setDrafts(prev => {
             const d = prev[chatId];
             if (!d) return prev;
-
-            // Registra o descarte desta parte individual
             recordDraftAction({
                 promptLogId:   d.promptLogId,
                 chatId,
@@ -277,7 +318,6 @@ function App() {
                     action:       'discarded',
                 }],
             });
-
             const parts = d.parts.filter((_, i) => i !== idx);
             if (parts.length === 0) {
                 const next = { ...prev };
@@ -305,14 +345,11 @@ function App() {
         });
     };
 
-    /** Carrega o draft no input para edição manual e registra como 'discarded' no banco
-     *  (o usuário vai enviar via input, não via draft) */
     const editDraft = () => {
         if (!selectedChat) return;
         const d = drafts[selectedChat.id];
         if (!d) return;
         setMessageInput(d.parts.join(' '));
-
         recordDraftAction({
             promptLogId:   d.promptLogId,
             chatId:        selectedChat.id,
@@ -320,20 +357,16 @@ function App() {
             sentParts:     [],
             originalParts: d.originalParts,
         });
-
         setDrafts(prev => { const next = { ...prev }; delete next[selectedChat.id]; return next; });
     };
 
-    /** Envia todas as partes e registra a ação no banco. */
     const sendAllParts = async () => {
         if (!selectedChat) return;
         const d = drafts[selectedChat.id];
         if (!d) return;
 
-        // Detecta se houve edição comparando com os originais
-        const wasEdited = d.parts.some((p, i) => p !== (d.originalParts[i] ?? p));
-        const action = wasEdited ? 'edited' : 'sent';
-
+        const wasEdited  = d.parts.some((p, i) => p !== (d.originalParts[i] ?? p));
+        const action     = wasEdited ? 'edited' : 'sent';
         const partActions = d.parts.map((p, i) => ({
             partIndex:    i,
             originalText: d.originalParts[i] ?? p,
@@ -350,24 +383,17 @@ function App() {
             partActions,
         });
 
-        // Remove o draft antes de enviar para evitar double-click
         setDrafts(prev => { const next = { ...prev }; delete next[selectedChat.id]; return next; });
-
-        for (const part of d.parts) {
-            await sendMessage(part);
-        }
+        for (const part of d.parts) await sendMessage(part);
     };
 
-    /** Envia apenas uma parte específica. */
     const sendPart = async (chatId: string, idx: number) => {
         const d = drafts[chatId];
         if (!d || !selectedChat) return;
 
         const originalText = d.originalParts[idx] ?? d.parts[idx];
         const finalText    = d.parts[idx];
-        const wasEdited    = finalText !== originalText;
 
-        // Registra a ação desta parte
         recordDraftAction({
             promptLogId:   d.promptLogId,
             chatId,
@@ -378,11 +404,10 @@ function App() {
                 partIndex:    idx,
                 originalText,
                 finalText,
-                action: wasEdited ? 'edited' : 'sent',
+                action: finalText !== originalText ? 'edited' : 'sent',
             }],
         });
 
-        // Remove a parte do draft
         setDrafts(prev => {
             const current = prev[chatId];
             if (!current) return prev;
@@ -436,6 +461,8 @@ function App() {
             setMessages([]);
             setSelectedChat(null);
             setDrafts({});
+            setChatsOffset(0);
+            setHasMoreChats(false);
             setStatus('Logging out…');
         } catch (err: any) {
             setError(err.message);
@@ -468,6 +495,9 @@ function App() {
                     multiGenerating={multiGenerating}
                     onGenerateSelected={generateDraftsForSelected}
                     onSelectChat={handleSelectChat}
+                    loadingChats={loadingChats}
+                    hasMoreChats={hasMoreChats}
+                    onLoadMoreChats={loadMoreChats}
                 />
 
                 <ChatArea

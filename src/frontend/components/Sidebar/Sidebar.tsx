@@ -19,6 +19,10 @@ interface SidebarProps {
     multiGenerating: boolean;
     onGenerateSelected: () => void;
     onSelectChat: (chat: Chat) => void;
+    // paginação
+    loadingChats: boolean;
+    hasMoreChats: boolean;
+    onLoadMoreChats: () => void;
 }
 
 export function Sidebar({
@@ -29,23 +33,17 @@ export function Sidebar({
     selectedChatIds, setSelectedChatIds,
     multiGenerating,
     onGenerateSelected, onSelectChat,
+    loadingChats, hasMoreChats, onLoadMoreChats,
 }: SidebarProps) {
     const unreadCount = chats.filter(c => c.unreadCount > 0).length;
 
     const handleSelectUnread = () => {
-        const unreadIds = chats
-            .filter(c => c.unreadCount > 0)
-            .map(c => c.id);
+        const unreadIds = chats.filter(c => c.unreadCount > 0).map(c => c.id);
         setSelectedChatIds(new Set(unreadIds));
     };
 
-    const handleSelectAll = () => {
-        setSelectedChatIds(new Set(chats.map(c => c.id)));
-    };
-
-    const handleSelectNone = () => {
-        setSelectedChatIds(new Set());
-    };
+    const handleSelectAll  = () => setSelectedChatIds(new Set(chats.map(c => c.id)));
+    const handleSelectNone = () => setSelectedChatIds(new Set());
 
     return (
         <div className="sidebar">
@@ -72,6 +70,9 @@ export function Sidebar({
                 selectedChatIds={selectedChatIds}
                 drafts={drafts}
                 onSelectChat={onSelectChat}
+                loadingChats={loadingChats}
+                hasMoreChats={hasMoreChats}
+                onLoadMoreChats={onLoadMoreChats}
             />
         </div>
     );
