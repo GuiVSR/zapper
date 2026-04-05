@@ -1,8 +1,8 @@
 import React from 'react';
 import { Chat, AIDraft } from '../../types';
 import { SidebarToolbar } from './SidebarToolbar';
-import { MultiSelectBar } from './MultiSelectBar';
 import { ChatList } from './ChatList';
+import './Sidebar.css';
 
 interface SidebarProps {
     chats: Chat[];
@@ -15,6 +15,7 @@ interface SidebarProps {
     multiSelectMode: boolean;
     toggleMultiSelect: () => void;
     selectedChatIds: Set<string>;
+    setSelectedChatIds: React.Dispatch<React.SetStateAction<Set<string>>>;
     multiGenerating: boolean;
     onGenerateSelected: () => void;
     onSelectChat: (chat: Chat) => void;
@@ -25,9 +26,27 @@ export function Sidebar({
     messageLimit, setMessageLimit,
     maxDraftParts, setMaxDraftParts,
     multiSelectMode, toggleMultiSelect,
-    selectedChatIds, multiGenerating,
+    selectedChatIds, setSelectedChatIds,
+    multiGenerating,
     onGenerateSelected, onSelectChat,
 }: SidebarProps) {
+    const unreadCount = chats.filter(c => c.unreadCount > 0).length;
+
+    const handleSelectUnread = () => {
+        const unreadIds = chats
+            .filter(c => c.unreadCount > 0)
+            .map(c => c.id);
+        setSelectedChatIds(new Set(unreadIds));
+    };
+
+    const handleSelectAll = () => {
+        setSelectedChatIds(new Set(chats.map(c => c.id)));
+    };
+
+    const handleSelectNone = () => {
+        setSelectedChatIds(new Set());
+    };
+
     return (
         <div className="sidebar">
             <SidebarToolbar
@@ -37,14 +56,15 @@ export function Sidebar({
                 setMaxDraftParts={setMaxDraftParts}
                 multiSelectMode={multiSelectMode}
                 toggleMultiSelect={toggleMultiSelect}
+                onSelectUnread={handleSelectUnread}
+                onSelectAll={handleSelectAll}
+                onSelectNone={handleSelectNone}
+                onGenerate={onGenerateSelected}
+                chatCount={chats.length}
+                unreadCount={unreadCount}
+                selectedCount={selectedChatIds.size}
+                multiGenerating={multiGenerating}
             />
-            {multiSelectMode && (
-                <MultiSelectBar
-                    selectedChatIds={selectedChatIds}
-                    multiGenerating={multiGenerating}
-                    onGenerate={onGenerateSelected}
-                />
-            )}
             <ChatList
                 chats={chats}
                 selectedChat={selectedChat}

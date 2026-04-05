@@ -1,5 +1,6 @@
 import React from 'react';
 import { Chat } from '../../types';
+import './ChatArea.css';
 
 interface ChatHeaderProps {
     chat: Chat;

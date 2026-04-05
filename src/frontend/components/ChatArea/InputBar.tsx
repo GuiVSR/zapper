@@ -1,5 +1,6 @@
 import React from 'react';
 import { ACCEPTED_FILE_TYPES } from '../../utils/fileHelpers';
+import './ChatArea.css';
 
 interface InputBarProps {
     messageInput: string;
