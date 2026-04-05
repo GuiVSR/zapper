@@ -12,6 +12,7 @@ A WhatsApp web client with AI-powered reply drafting. Messages from each custome
 - ✅ One-click send, or edit before sending
 - 🔔 Browser tab badge showing number of pending drafts
 - 📜 Chat history with the last 10 messages included as context for the AI
+- 🗄️ Supabase integration — every AI draft and user action (sent, edited, discarded) is logged to Postgres
 
 ---
 
@@ -21,6 +22,7 @@ A WhatsApp web client with AI-powered reply drafting. Messages from each custome
 - A WhatsApp account (personal or business)
 - A [Groq](https://console.groq.com) API key (free)
 - A [Deepgram](https://console.deepgram.com) API key (optional — for audio transcription)
+- A [Supabase](https://supabase.com) project (optional — for prompt logging)
 
 ---
 
@@ -32,6 +34,8 @@ cd zapper
 npm install
 ```
 
+> `pg` and `@types/pg` are already listed in `package.json` and will be installed automatically with `npm install`.
+
 ---
 
 ## Environment variables
@@ -42,7 +46,7 @@ Copy the example and fill in your keys:
 cp .env.example .env
 ```
 
-At minimum you need a Groq API key. For audio transcription, add a Deepgram API key too. See `.env.example` for all available options.
+At minimum you need a Groq API key. See `.env.example` for all available options.
 
 ### Available Groq models
 
@@ -115,6 +119,56 @@ Set `SYSTEM_PROMPT` in your `.env` file — no code changes needed. If `SYSTEM_P
 
 ---
 
+## Database setup (Supabase)
+
+Zapper can log every AI-generated draft and the action the operator took on it (sent, edited, discarded) to a Postgres database on Supabase. This is optional — the app works without it, but no prompt history will be saved.
+
+### 1. Create a Supabase project
+
+Go to [supabase.com](https://supabase.com), create a new project, and wait for it to be ready.
+
+### 2. Run the migration
+
+1. In the Supabase Dashboard, open your project → **SQL Editor**
+2. Paste the contents of `supabase/migrations/001_initial_schema.sql`
+3. Click **Run**
+
+This creates three tables:
+
+| Table | Purpose |
+|---|---|
+| `sessions` | One row per WhatsApp connection (QR scan → logout) |
+| `prompt_logs` | One row per AI draft generated |
+| `prompt_part_actions` | One row per individual part sent/discarded when using multi-part drafts |
+
+### 3. Add the connection string to `.env`
+
+Find your connection string in: **Supabase Dashboard → Project Settings → Database → Connection string → URI**
+
+Add it to your `.env`:
+
+```
+SUPABASE_DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.<project-ref>.supabase.co:5432/postgres
+```
+
+Replace `[YOUR-PASSWORD]` with your database password. That's it — the server will connect and log prompt data automatically on startup.
+
+### How prompt logging works
+
+Every time the AI generates a draft, a row is inserted into `prompt_logs` with status `pending`. When the operator interacts with it, the row is updated:
+
+| Operator action | `action` value | `was_edited` |
+|---|---|---|
+| Clicks **Send** (no changes) | `sent` | `false` |
+| Edits text, then sends | `edited` | `true` |
+| Clicks **✕ Discard all** | `discarded` | `false` |
+| Clicks **✏️ Edit in input** | `discarded` | `false` |
+| Sends/discards individual parts | `partial` | depends |
+
+For multi-part drafts, each part's individual action is also recorded in `prompt_part_actions`.
+
+---
+
 ## Project structure
 
 ```
@@ -122,6 +176,11 @@ zapper/
 ├── public/
 │   └── index.html
 ├── src/
+│   ├── db/
+│   │   ├── client.ts       ← Postgres connection pool (Supabase)
+│   │   ├── index.ts        ← barrel export
+│   │   ├── repository.ts   ← INSERT/UPDATE helpers
+│   │   └── types.ts        ← TypeScript types mirroring the schema
 │   ├── frontend/
 │   │   ├── App.css
 │   │   ├── App.tsx
@@ -145,6 +204,9 @@ zapper/
 │   ├── debug.ts
 │   ├── main.ts
 │   └── server.ts
+├── supabase/
+│   └── migrations/
+│       └── 001_initial_schema.sql
 ├── tmp/
 │   └── stickers/
 ├── CHANGELOG.md
@@ -184,3 +246,7 @@ LLM_PROVIDER=groq      # or gemini, deepseek
 
 **Session expired**
 - Delete the `.wwebjs_auth/` folder and restart the server to get a new QR code
+
+**"SUPABASE_DATABASE_URL is not set"**
+- The app will print a warning and continue running without saving prompt logs
+- Add the variable to your `.env` if you want logging enabled (see Database setup above)

@@ -11,6 +11,32 @@ import { Lightbox } from './components/Lightbox';
 import { ChatArea } from './components/ChatArea/ChatArea';
 import { Sidebar } from './components/Sidebar/Sidebar';
 
+// ── Draft action helper ───────────────────────────────────────────────────────
+async function recordDraftAction(payload: {
+    promptLogId?: string;
+    chatId: string;
+    action: 'sent' | 'edited' | 'discarded' | 'partial';
+    sentParts: string[];
+    originalParts: string[];
+    partActions?: Array<{
+        partIndex: number;
+        originalText: string;
+        finalText: string | null;
+        action: 'sent' | 'edited' | 'discarded';
+    }>;
+}): Promise<void> {
+    try {
+        await fetch(`${API_BASE_URL}/api/draft-action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+    } catch (err) {
+        // Não bloqueia o fluxo principal — logging apenas
+        console.warn('[draft-action] Failed to record:', err);
+    }
+}
+
 function App() {
     const [messages, setMessages]           = useState<Message[]>([]);
     const [qrCode, setQrCode]               = useState<string>('');
@@ -37,7 +63,7 @@ function App() {
     // Shared message limit
     const [messageLimit, setMessageLimit] = useState(HISTORY_CONTEXT);
 
-    // Max draft parts — controls how many parts the AI should split into
+    // Max draft parts
     const [maxDraftParts, setMaxDraftParts] = useState(DEFAULT_MAX_DRAFT_PARTS);
 
     // File upload
@@ -51,7 +77,7 @@ function App() {
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
     useEffect(() => { updateFavicon(Object.keys(drafts).length); }, [drafts]);
 
-    // Sync maxDraftParts to the server whenever it changes so the auto-pool uses the same value
+    // Sync maxDraftParts to the server
     useEffect(() => {
         fetch(`${API_BASE_URL}/api/settings`, {
             method: 'POST',
@@ -161,7 +187,6 @@ function App() {
                 id: Date.now().toString(), from: 'me', to: selectedChat.id,
                 body, timestamp: Math.floor(Date.now() / 1000), type: 'chat', fromMe: true,
             }]);
-            // Mirror the server-side sendSeen — clear the unread badge immediately
             setChats(prev => prev.map(c => c.id === selectedChat.id ? { ...c, unreadCount: 0 } : c));
             setMessageInput('');
         } catch (err: any) { setError(err.message); }
@@ -177,11 +202,7 @@ function App() {
         try {
             const base64 = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
-                reader.onload = () => {
-                    const result = reader.result as string;
-                    // strip data:...;base64, prefix
-                    resolve(result.split(',')[1]);
-                };
+                reader.onload = () => resolve((reader.result as string).split(',')[1]);
                 reader.onerror = () => reject(new Error('Failed to read file'));
                 reader.readAsDataURL(file);
             });
@@ -202,7 +223,6 @@ function App() {
                 throw new Error(err.error || `HTTP ${res.status}`);
             }
 
-            // Add optimistic message to chat
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),
                 from: 'me',
@@ -216,7 +236,6 @@ function App() {
             setError(err.message);
         } finally {
             setSendingMedia(false);
-            // Reset input so re-uploading the same file triggers onChange
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
@@ -226,14 +245,39 @@ function App() {
     const discardDraft = (chatId?: string) => {
         const id = chatId ?? selectedChat?.id;
         if (!id) return;
+        const d = drafts[id];
+        if (d) {
+            recordDraftAction({
+                promptLogId:   d.promptLogId,
+                chatId:        id,
+                action:        'discarded',
+                sentParts:     [],
+                originalParts: d.originalParts,
+            });
+        }
         setDrafts(prev => { const next = { ...prev }; delete next[id]; return next; });
     };
 
-    /** Remove a single part from the draft. */
     const removePart = (chatId: string, idx: number) => {
         setDrafts(prev => {
             const d = prev[chatId];
             if (!d) return prev;
+
+            // Registra o descarte desta parte individual
+            recordDraftAction({
+                promptLogId:   d.promptLogId,
+                chatId,
+                action:        'partial',
+                sentParts:     d.parts.filter((_, i) => i !== idx),
+                originalParts: d.originalParts,
+                partActions: [{
+                    partIndex:    idx,
+                    originalText: d.originalParts[idx] ?? d.parts[idx],
+                    finalText:    null,
+                    action:       'discarded',
+                }],
+            });
+
             const parts = d.parts.filter((_, i) => i !== idx);
             if (parts.length === 0) {
                 const next = { ...prev };
@@ -244,7 +288,6 @@ function App() {
         });
     };
 
-    /** Edit a single part inline. */
     const updatePart = (chatId: string, idx: number, value: string) => {
         setDrafts(prev => {
             const d = prev[chatId];
@@ -254,7 +297,6 @@ function App() {
         });
     };
 
-    /** Merge all parts into one, joined by a space. */
     const mergeParts = (chatId: string) => {
         setDrafts(prev => {
             const d = prev[chatId];
@@ -263,33 +305,97 @@ function App() {
         });
     };
 
-    /** Load the merged text into the input box for manual editing. */
+    /** Carrega o draft no input para edição manual e registra como 'discarded' no banco
+     *  (o usuário vai enviar via input, não via draft) */
     const editDraft = () => {
         if (!selectedChat) return;
         const d = drafts[selectedChat.id];
         if (!d) return;
         setMessageInput(d.parts.join(' '));
-        discardDraft();
+
+        recordDraftAction({
+            promptLogId:   d.promptLogId,
+            chatId:        selectedChat.id,
+            action:        'discarded',
+            sentParts:     [],
+            originalParts: d.originalParts,
+        });
+
+        setDrafts(prev => { const next = { ...prev }; delete next[selectedChat.id]; return next; });
     };
 
-    /** Send all parts as separate WhatsApp messages in sequence. */
+    /** Envia todas as partes e registra a ação no banco. */
     const sendAllParts = async () => {
         if (!selectedChat) return;
         const d = drafts[selectedChat.id];
         if (!d) return;
-        discardDraft();
+
+        // Detecta se houve edição comparando com os originais
+        const wasEdited = d.parts.some((p, i) => p !== (d.originalParts[i] ?? p));
+        const action = wasEdited ? 'edited' : 'sent';
+
+        const partActions = d.parts.map((p, i) => ({
+            partIndex:    i,
+            originalText: d.originalParts[i] ?? p,
+            finalText:    p,
+            action:       (p !== (d.originalParts[i] ?? p) ? 'edited' : 'sent') as 'sent' | 'edited',
+        }));
+
+        recordDraftAction({
+            promptLogId:   d.promptLogId,
+            chatId:        selectedChat.id,
+            action,
+            sentParts:     d.parts,
+            originalParts: d.originalParts,
+            partActions,
+        });
+
+        // Remove o draft antes de enviar para evitar double-click
+        setDrafts(prev => { const next = { ...prev }; delete next[selectedChat.id]; return next; });
+
         for (const part of d.parts) {
             await sendMessage(part);
         }
     };
 
-    /** Send only one specific part. */
+    /** Envia apenas uma parte específica. */
     const sendPart = async (chatId: string, idx: number) => {
         const d = drafts[chatId];
         if (!d || !selectedChat) return;
-        const part = d.parts[idx];
-        removePart(chatId, idx);
-        await sendMessage(part);
+
+        const originalText = d.originalParts[idx] ?? d.parts[idx];
+        const finalText    = d.parts[idx];
+        const wasEdited    = finalText !== originalText;
+
+        // Registra a ação desta parte
+        recordDraftAction({
+            promptLogId:   d.promptLogId,
+            chatId,
+            action:        'partial',
+            sentParts:     [finalText],
+            originalParts: d.originalParts,
+            partActions: [{
+                partIndex:    idx,
+                originalText,
+                finalText,
+                action: wasEdited ? 'edited' : 'sent',
+            }],
+        });
+
+        // Remove a parte do draft
+        setDrafts(prev => {
+            const current = prev[chatId];
+            if (!current) return prev;
+            const parts = current.parts.filter((_, i) => i !== idx);
+            if (parts.length === 0) {
+                const next = { ...prev };
+                delete next[chatId];
+                return next;
+            }
+            return { ...prev, [chatId]: { ...current, parts } };
+        });
+
+        await sendMessage(finalText);
     };
 
     // ── On-demand generation ──────────────────────────────────────────────────

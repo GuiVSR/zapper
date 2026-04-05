@@ -60,8 +60,16 @@ export function useSocket(config: UseSocketConfig) {
         socket.on('chats_list',   (list: Chat[]) => configRef.current.setChats(list));
         socket.on('auth_failure', (data: { message: string }) => { configRef.current.setStatus(`Auth failed: ${data.message}`); configRef.current.setError(data.message); });
         socket.on('error',        (err: any) => configRef.current.setError(err?.message || 'Socket error'));
-        socket.on('ai_draft', (draft: AIDraft) => {
-            configRef.current.setDrafts(prev => ({ ...prev, [draft.chatId]: draft }));
+        socket.on('ai_draft', (draft: AIDraft & { promptLogId?: string }) => {
+            configRef.current.setDrafts(prev => ({
+                ...prev,
+                [draft.chatId]: {
+                    ...draft,
+                    // Guarda uma cópia imutável das partes originais para diff posterior
+                    originalParts: [...draft.parts],
+                    promptLogId:   draft.promptLogId,
+                },
+            }));
             configRef.current.setGeneratingDraft(false);
             configRef.current.setMultiGenerating(false);
         });
