@@ -6,6 +6,27 @@
 ### Changed
 - Refactored code for better error handling;
 - Updated whatsapp-web-js version, whatsapp changed the version and that broke the entire project.
+## [1.10.0] — 2026-04-05
+
+**Author:** Thiago Deodato
+
+### Dual database driver support (postgres.js + pg)
+
+#### Added
+- **`postgres.js` driver** — alternative database driver using the `postgres` npm package; resolves IPv6 connectivity issues that affect `pg` in some environments (VPS, Docker without dual-stack, etc.)
+- **`SUPABASE_POSTGRES_URL` env var** — set this to use the postgres.js driver with Supabase's Transaction Pooler (port 6543); takes priority over `SUPABASE_DATABASE_URL` when both are defined
+- **`getDriverName()`** export in `src/db/client.ts` — returns `'pg' | 'postgres.js' | 'none'` for logging and diagnostics
+- **`.env.example`** — updated with both database options documented side by side, including how to obtain each connection string from the Supabase Dashboard
+
+#### Changed
+- **`src/db/client.ts`** — fully rewritten to support two interchangeable drivers behind a shared `query()` / `queryOne()` interface; driver is selected automatically at startup based on which env var is present
+- **`QueryResult` type** — changed from `Record<string, unknown>` (required index signature on all generic types) to `object` (accepts any non-primitive), fixing TypeScript errors on `Session`, `PromptLog`, and related interfaces in `repository.ts`
+- Startup log now prints `[DB] Using postgres.js driver` or `[DB] Using pg driver` depending on which is active
+
+#### Fixed
+- `Type 'Session' does not satisfy the constraint 'QueryResult'` — and equivalent errors on `PromptLog`, `PromptPartAction` — caused by the overly strict `Record<string, unknown>` constraint on the generic type parameter
+
+---
 
 ## [1.8.0] — 2026-04-01
 

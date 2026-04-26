@@ -1,6 +1,7 @@
 import React from 'react';
 import { AIDraft } from '../../types';
 import { formatTimestamp } from '../../utils/formatTimestamp';
+import './DraftBanner.css';
 
 interface DraftBannerProps {
     draft: AIDraft;
