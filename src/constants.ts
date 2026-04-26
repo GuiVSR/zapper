@@ -17,6 +17,8 @@ export const DEFAULT_HISTORY_LIMIT    = 50;
 export const DEFAULT_SEARCH_LIMIT     = 50;
 export const DEFAULT_CHATS_LIMIT      = 10;
 export const DEFAULT_SIDEBAR_CHATS    = 5;
+export const DEFAULT_CHATS_BATCH_SIZE       = 10;
+export const DEFAULT_SEARCH_CHAT_BATCH_SIZE = 5;
 
 // ── Message pooling ───────────────────────────────────────────────────────────
 export const POOL_WINDOW_MS      = 10_000;

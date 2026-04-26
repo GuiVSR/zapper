@@ -233,8 +233,67 @@ export class WhatsAppClient {
             formattedId = `${formattedId.replace(/[^0-9+]/g, '')}@c.us`;
         }
 
-        const chat = await this.client.getChatById(formattedId);
-        const messages = await chat.fetchMessages({ limit });
+        // Force a refresh of all chats to ensure the client has the latest state
+        // This might help resolve issues where getChatById returns a stale/incomplete object
+        const allChats = await this.client.getChats();
+        let chat = allChats.find(c => c.id._serialized === formattedId);
+
+        if (!chat) {
+            // Fallback to getChatById if not found in refreshed list (should not happen)
+            chat = await this.client.getChatById(formattedId);
+            if (!chat) {
+                console.error(`ERROR: Chat object is null or undefined for ID: ${chatId} even after refreshing all chats.`);
+                throw new Error(`Chat not found for ID: ${chatId} even after refreshing all chats.`);
+            }
+            console.warn(`WARN: Chat found via getChatById after refresh for ID: ${chatId}. Might indicate a timing issue.`);
+        }
+
+        console.log(`DEBUG: Chat object found for ID: ${chatId}. Type: ${typeof chat}, Keys: ${Object.keys(chat)}`);
+
+        // Introduce a short delay to allow whatsapp-web.js to fully initialize the chat object
+        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+
+        // Attempt to mark the chat as seen to force internal synchronization
+        try {
+            console.log(`DEBUG: Attempting to sendSeen for chat ID: ${chatId}`);
+            await chat.sendSeen();
+            console.log(`DEBUG: sendSeen successful for chat ID: ${chatId}`);
+        } catch (error: any) {
+            console.warn(`WARN: sendSeen failed for chat ID: ${chatId}. Error: ${error.message}. Continuing with fetchMessages...`);
+            // Continue even if sendSeen fails, as fetchMessages might still work
+        }
+
+        console.log(`DEBUG: Attempting to fetch messages for chat ID: ${chatId} with limit: ${limit}`);
+        let messages: any[] = [];
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 1000; // 1 second
+
+        for (let i = 0; i < MAX_RETRIES; i++) {
+            try {
+                messages = await chat.fetchMessages({ limit });
+                console.log(`DEBUG: Successfully fetched ${messages.length} messages for chat ID: ${chatId} on attempt ${i + 1}`);
+                break; // Exit loop if successful
+            } catch (error: any) {
+                console.warn(`WARN: Failed to fetch messages for chat ID: ${chatId} on attempt ${i + 1}. Error: ${error.message}. Retrying...`);
+                if (i < MAX_RETRIES - 1) {
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                } else {
+                    console.error(`ERROR: All ${MAX_RETRIES} retries failed for chat ID: ${chatId}. Last error: ${error.message}`);
+                    if (error.message.includes('waitForChatLoading')) {
+                        console.warn(`WARN: Gracefully returning empty messages for chat ID: ${chatId} due to persistent waitForChatLoading error.`);
+                        messages = []; // Return empty messages for this specific error
+                        break; // Exit loop, effectively succeeding with empty messages
+                    } else {
+                        throw new Error(`Failed to fetch messages for chat ID: ${chatId} after ${MAX_RETRIES} attempts. Details: ${error.message}`);
+                    }
+                }
+            }
+        }
+
+        // Ensure messages is defined before using it (should be if no throw)
+        if (!messages) {
+            throw new Error(`Unexpected error: messages could not be fetched for chat ID: ${chatId}`);
+        }
 
         return messages.map(msg => ({
             id:           msg.id.id,
@@ -425,7 +484,14 @@ export class WhatsAppClient {
 
     public async getChats() {
         if (!this.isInitialized) throw new Error('Client not initialized.');
-        return this.client.getChats();
+        console.log('DEBUG: WhatsAppClient.getChats() called. Requesting chats from whatsapp-web.js...');
+        const rawChats = await this.client.getChats();
+        console.log(`DEBUG: whatsapp-web.js returned ${rawChats.length} raw chats.`);
+        // Log a sample of rawChats to inspect their structure
+        rawChats.slice(0, 5).forEach((chat, index) => {
+            console.log(`DEBUG:   Raw chat ${index}: ID=${chat.id?._serialized}, Name=${chat.name}, IsGroup=${chat.isGroup}, LastMessage=${chat.lastMessage?.id?._serialized ? 'Yes' : 'No'}`);
+        });
+        return rawChats;
     }
 
     public async logout(): Promise<void> {
