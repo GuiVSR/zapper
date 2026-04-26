@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT, DEFAULT_CHATS_LIMIT } from './constants';
+import { SERVER_PORT, DEFAULT_HISTORY_LIMIT, DEFAULT_SEARCH_LIMIT } from './constants';
 import express from 'express';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
@@ -18,15 +18,19 @@ const io = new SocketServer(server, {
     },
 });
 
-// ── WhatsApp client ───────────────────────────────────────────────────────────
+let currentQr: string | null = null;
+let isWhatsappReady: boolean = false;
+
 const whatsappClient = new WhatsAppClient({
     headless: true,
     onQR: (qr: string) => {
         console.log('📱 QR Code received, sending to frontend...');
+        currentQr = qr; // Store the QR code
         io.emit('qr', { qr });
     },
     onReady: () => {
         console.log('✅ WhatsApp client is ready!');
+        isWhatsappReady = true; // Update ready state
         io.emit('ready', { message: 'WhatsApp is connected and ready!' });
 
         // Kick off background contact name resolution on startup
@@ -99,7 +103,6 @@ const whatsappClient = new WhatsAppClient({
     },
 });
 
-// ── Message handler ───────────────────────────────────────────────────────────
 const messageHandler = new MessageHandler(
     whatsappClient,
     process.env.WEBHOOK_URL,
@@ -135,35 +138,42 @@ app.get('/api/status', (_req, res) => {
     });
 });
 
-app.get('/api/chats', async (_req, res) => {
+app.get('/api/chats', async (req, res) => {
     if (!whatsappClient.isReady()) {
         return res.status(503).json({ error: 'WhatsApp client not ready' });
     }
     try {
         const chats = await whatsappClient.getChats();
+        console.log(`DEBUG: Server received ${chats.length} chats from whatsappClient.getChats().`);
 
         // Trigger background refresh for any non-group chats not yet cached
         const nonGroupIds = chats
             .filter(c => !c.isGroup)
             .map(c => c.id._serialized);
+        console.log(`DEBUG: Found ${nonGroupIds.length} non-group chats for background contact name resolution.`);
         refreshContactNames(whatsappClient, nonGroupIds);
 
-        res.json(
-            chats.map(chat => {
-                // Use cached contact name if available (resolved in background)
-                const cachedName = !chat.isGroup
+        const formattedChats = chats.map(chat => {
+            // Use cached contact name if available (resolved in background)
+            const cachedName = !chat.isGroup
                     ? getCachedName(chat.id._serialized)
                     : undefined;
 
-                return {
-                    id:          chat.id._serialized,
-                    name:        cachedName || chat.name || chat.id.user || 'Unknown',
-                    isGroup:     chat.isGroup,
-                    unreadCount: chat.unreadCount,
-                    timestamp:   chat.timestamp,
-                };
-            })
-        );
+            return {
+                id:          chat.id._serialized, // Corrected from chat.id.id
+                name:        cachedName || chat.name || chat.id.user || 'Unknown',
+                isGroup:     chat.isGroup,
+                unreadCount: chat.unreadCount,
+                timestamp:   chat.timestamp,
+            };
+        });
+
+        console.log(`DEBUG: Sending ${formattedChats.length} formatted chats to frontend. Sample (first 5):`);
+        formattedChats.slice(0, 5).forEach((chat, index) => {
+            console.log(`DEBUG:   Formatted chat ${index}: ID=${chat.id}, Name=${chat.name}, IsGroup=${chat.isGroup}, UnreadCount=${chat.unreadCount}`);
+        });
+
+        res.json(formattedChats);
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to fetch chats', details: err.message });
     }
@@ -213,7 +223,9 @@ app.get('/api/chats-with-messages', async (req, res) => {
 });
 
 app.get('/api/conversation/:number', async (req, res) => {
-    if (!whatsappClient.isReady()) return res.status(503).json({ error: 'WhatsApp client not ready' });
+    if (!whatsappClient.isReady()) {
+        return res.status(503).json({ error: 'WhatsApp client not ready' });
+    }
     try {
         const { number } = req.params;
         const limit = parseInt(req.query.limit as string) || DEFAULT_HISTORY_LIMIT;
@@ -328,7 +340,13 @@ whatsappClient.initialize().catch(err => {
 io.on('connection', (socket) => {
     console.log('✅ Client connected:', socket.id);
     socket.emit('ready', { message: 'Connected to WhatsApp server!' });
-    if (whatsappClient.isReady()) {
+    // Re-emit stored QR code or ready state to new clients
+    if (currentQr) {
+        console.log(`DEBUG: Re-emitting stored QR code to new client ${socket.id}`);
+        socket.emit('qr', { qr: currentQr });
+    }
+    if (isWhatsappReady) {
+        console.log(`DEBUG: Re-emitting WhatsApp client ready state to new client ${socket.id}`);
         socket.emit('client_ready', { message: 'WhatsApp client is already ready!' });
     }
 

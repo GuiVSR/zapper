@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.0] — 2026-04-26
+**Author:** GuiVSR
+
+### Changed
+- Refactored code for better error handling;
+- Updated whatsapp-web-js version, whatsapp changed the version and that broke the entire project.
+
 ## [1.8.0] — 2026-04-01
 
 **Author:** Putzeys
