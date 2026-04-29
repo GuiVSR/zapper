@@ -303,6 +303,7 @@ app.post('/api/send-message', async (req, res) => {
     if (!to || !message) return res.status(400).json({ error: 'Missing "to" or "message" field' });
     try {
         const result = await whatsappClient.sendMessage(to, message);
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
         res.json({ success: true, message: 'Message sent successfully', id: result.id.id });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to send message', details: err.message });
@@ -323,6 +324,7 @@ app.post('/api/send-media', async (req, res) => {
     }
     try {
         const result = await whatsappClient.sendMedia(to, data, mimetype, filename, caption);
+        whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
         res.json({ success: true, message: 'Media sent successfully', id: result.id.id });
     } catch (err: any) {
         res.status(500).json({ error: 'Failed to send media', details: err.message });
@@ -523,6 +525,7 @@ io.on('connection', (socket) => {
         if (!whatsappClient.isReady()) return socket.emit('error', { message: 'WhatsApp client not ready' });
         try {
             await whatsappClient.sendMessage(to, message);
+            whatsappClient.markChatAsRead(to).catch(() => {/* non-critical */});
             socket.emit('message_sent', { success: true, to, message });
         } catch {
             socket.emit('error', { message: 'Failed to send message' });

@@ -253,16 +253,6 @@ export class WhatsAppClient {
         // Introduce a short delay to allow whatsapp-web.js to fully initialize the chat object
         await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
 
-        // Attempt to mark the chat as seen to force internal synchronization
-        try {
-            console.log(`DEBUG: Attempting to sendSeen for chat ID: ${chatId}`);
-            await chat.sendSeen();
-            console.log(`DEBUG: sendSeen successful for chat ID: ${chatId}`);
-        } catch (error: any) {
-            console.warn(`WARN: sendSeen failed for chat ID: ${chatId}. Error: ${error.message}. Continuing with fetchMessages...`);
-            // Continue even if sendSeen fails, as fetchMessages might still work
-        }
-
         console.log(`DEBUG: Attempting to fetch messages for chat ID: ${chatId} with limit: ${limit}`);
         let messages: any[] = [];
         const MAX_RETRIES = 3;
