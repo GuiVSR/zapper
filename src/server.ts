@@ -43,6 +43,7 @@ const whatsappClient = new WhatsAppClient({
     },
     onReady: async () => {
         console.log('✅ WhatsApp client is ready!');
+        currentQr = null; // Clear stale QR — no longer needed once authenticated
         isWhatsappReady = true; // Update ready state
         io.emit('ready', { message: 'WhatsApp is connected and ready!' });
 
