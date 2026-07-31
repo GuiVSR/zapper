@@ -1,0 +1,335 @@
+/* SIDEBAR */
+.sidebar {
+  width: 300px;
+  background: #f0f2f5;
+  border-right: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.chat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+}
+
+.chat-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-item:hover { background: #e9ecef; }
+.chat-item.active { background: #dbeafe; }
+
+.chat-name { font-weight: 500; }
+
+.chat-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2d7dd2;
+  color: white;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-ai {
+  background: #7c3aed;
+  font-size: 10px;
+}
+
+.chat-meta {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-preview {
+  font-size: 12px;
+  color: #666;
+}
+
+/* ── MULTI-SELECT CHAT ITEMS ─────────────────────────────────────────────── */
+.chat-item.multi-selected { background: #dbeafe; }
+.chat-item.multi-selected:hover { background: #bfdbfe; }
+
+.chat-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #2d7dd2;
+  border-radius: 4px;
+  margin-right: 8px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: white;
+  background: white;
+  transition: background 0.1s;
+}
+
+.chat-checkbox.checked { background: #2d7dd2; }
+
+/* ── SIDEBAR TOOLBAR CONTAINER (tabs + content) ─────────────────────────── */
+.sidebar-toolbar-container {
+  flex-shrink: 0;
+  border-bottom: 1px solid #ddd;
+  background: white;
+}
+
+/* ── SIDEBAR TOOLBAR (Chats tab) ─────────────────────────────────────────── */
+.sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: white;
+  border-bottom: 1px solid #eee;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.limit-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.limit-control input {
+  width: 46px;
+  padding: 4px 6px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+}
+
+.limit-control input:focus {
+  border-color: #2d7dd2;
+}
+
+/* ── SIDEBAR TABS ────────────────────────────────────────────────────────── */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid #eee;
+}
+
+.sidebar-tab {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  background: #f7f8fa;
+  color: #888;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.sidebar-tab:first-child { border-right: 1px solid #eee; }
+
+.sidebar-tab:hover:not(.active) {
+  background: #eef1f5;
+  color: #555;
+}
+
+.sidebar-tab.active {
+  background: white;
+  color: #1a56a0;
+  box-shadow: inset 0 -2px 0 #2d7dd2;
+}
+
+/* ── SELECT PANEL ────────────────────────────────────────────────────────── */
+.sidebar-select-panel {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.select-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-start;
+}
+
+.select-action-btn {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  color: #444;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.select-action-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.select-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.select-action-count {
+  background: #2d7dd2;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.select-action-label {
+  display: block;
+  text-align: left !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: auto;
+  min-width: 0;
+}
+
+.select-action-emoji {
+  flex-shrink: 0;
+}
+
+/* ── SELECT GENERATE ROW (Parts stepper + Generate button) ───────────────── */
+.select-generate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.select-generate-row .btn-generate-multi {
+  flex: 1;
+}
+
+/* ── PARTS STEPPER ───────────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f0f2f5;
+  color: #333;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: #dbeafe;
+  color: #1a56a0;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  width: 28px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-left: 1px solid #ddd;
+  border-right: 1px solid #ddd;
+  line-height: 28px;
+  user-select: none;
+}
+
+/* ── MULTI-SELECT BAR ────────────────────────────────────────────────────── */
+.multi-generate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+  flex-shrink: 0;
+}
+
+.multi-count {
+  font-size: 12px;
+  color: #1e40af;
+  font-weight: 500;
+}
+
+.btn-generate-multi {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #2d7dd2;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.btn-generate-multi:hover:not(:disabled) { background: #1a56a0; }
+.btn-generate-multi:disabled { opacity: 0.5; cursor: not-allowed; }

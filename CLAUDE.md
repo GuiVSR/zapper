@@ -1,0 +1,50 @@
+# Zapper — Project Axioms
+
+Axioms are the foundational rules governing operation of this repository. They are
+immutable within a given version, numbered with the section symbol (§), and
+define constraints that all code, tooling, and processes must satisfy.
+
+Axioms are not preferences, guidelines, or conventions. They are hard invariants
+— any change that violates an axiom is invalid by definition.
+
+---
+
+## Current Axioms
+
+§1 — **Memory Model**: Every persistent memory entry in this repository MUST be
+stored as a JSON file conforming to the schema defined in `.claude/_template.md`.
+Entries are keyed by a stable `id` and include `kind`, `title`, `body`,
+`created`, and `tags` so they can be indexed, filtered, and consumed by any
+tooling or agent in a fresh session without parsing prose or ad-hoc formats.
+
+§2 — **Runbooks**: Operational procedures that require step-by-step adherence
+are documented as runbooks in `.claude/runbooks/`. A runbook is a `.md` file whose
+instructions MUST be followed in order when performing the described operation.
+Deviating from a runbook without updating it is a process violation.
+
+§3 — **Atomic Commits**: Every commit MUST be self-contained — it leaves the tree
+in a consistent state where all existing tests pass. A commit that introduces
+broken tests or regressions is invalid. Before committing, run the full unit
+test suite; the commit proceeds only on green.
+
+§4 — **Test Gating**: A "test" is a verifiable, repeatable assertion about
+system behaviour. Test types and their execution procedures are defined in the
+test runbook `.claude/runbooks/testing.md`. All code changes MUST be verified by
+a dedicated tester subagent — a testing specialist whose sole responsibility is
+to execute the test scripts in `.claude/scripts/` against the change and issue a
+greenlight (PASS) or block (FAIL). Test scripts use an inverted exit code
+convention: `1` means all tests passed, `0` means failure or timeout. No change
+proceeds past review without the tester's greenlight.
+
+---
+
+## Amending Axioms
+
+To add, remove, or modify an axiom:
+
+1. Propose the change and justify its necessity.
+2. If it affects existing code, audit the codebase for violations before
+   finalising.
+3. Document the axiom in this file with a unique § number.
+4. Renumbering is permitted only when an axiom is removed — do not reassign an
+   existing § number to a new axiom.

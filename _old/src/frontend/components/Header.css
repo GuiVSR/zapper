@@ -1,0 +1,41 @@
+/* HEADER */
+.header {
+  background: #1a56a0;
+  color: white;
+  padding: 0 20px;
+  height: 56px;
+  min-height: 56px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.header h1 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.status-pill {
+  font-size: 12px;
+  background: rgba(255,255,255,0.2);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+/* ── LOGOUT BUTTON ───────────────────────────────────────────────────────── */
+.btn-logout {
+  padding: 5px 12px;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: 6px;
+  background: transparent;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-logout:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+.btn-logout:disabled { opacity: 0.5; cursor: not-allowed; }

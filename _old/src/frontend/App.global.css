@@ -1,0 +1,48 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: system-ui, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* LAYOUT */
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ERROR BAR */
+.error-bar {
+  background: #fdecea;
+  color: #c0392b;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-bottom: 1px solid #f5c6c6;
+  flex-shrink: 0;
+}
+
+/* QR */
+.qr {
+  text-align: center;
+  padding: 20px;
+  flex-shrink: 0;
+}
+
+/* EMPTY */
+.empty {
+  margin: auto;
+  color: #666;
+}
