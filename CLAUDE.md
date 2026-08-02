@@ -36,6 +36,21 @@ greenlight (PASS) or block (FAIL). Test scripts use an inverted exit code
 convention: `1` means all tests passed, `0` means failure or timeout. No change
 proceeds past review without the tester's greenlight.
 
+§5 — **cURLs**: A cURL is a reusable, self-contained HTTP request that exercises
+a specific API endpoint. Every cURL is documented in the cURL runbook
+`.claude/runbooks/curl.md` and MUST include method, URL, headers, and body.
+cURLs serve as the canonical reference for API behaviour — any API endpoint that
+lacks a corresponding cURL entry is considered undocumented.
+
+---
+
+## Runbook Index
+
+| Runbook | Path | Purpose |
+|---|---|---|
+| Testing | `.claude/runbooks/testing.md` | Test types, scripts, exit code convention, and tester subagent verdict rules |
+| cURLs | `.claude/runbooks/curl.md` | Canonical HTTP request references for every API endpoint |
+
 ---
 
 ## Amending Axioms
