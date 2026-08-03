@@ -52,6 +52,7 @@ lacks a corresponding cURL entry is considered undocumented.
 | cURLs | `.claude/runbooks/curl.md` | Canonical HTTP request references for every API endpoint |
 | Data Generation | `.claude/runbooks/data-generation.md` | Seed and fixture generation procedures for `tmp/db/` |
 | Smoke Tests | `.claude/runbooks/smoke-tests.md` | Fast server-alive checks — gatekeeper for all other test tiers |
+| Scripts | `.claude/runbooks/scripts.md` | Script creation conventions, exit codes, and automation triggers |
 
 ---
 

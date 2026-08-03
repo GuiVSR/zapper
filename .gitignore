@@ -7,3 +7,5 @@ dist
 tmp/
 .claude/memory/
 db/
+memory/*
+!memory/README.md

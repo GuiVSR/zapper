@@ -6,10 +6,15 @@ set -euo pipefail
 # Exit codes (tester subagent convention):
 #   0 — failure or timeout
 #   1 — all unit tests passed
-#
-# This script is a placeholder. Implementation TBD with the user.
 # ------------------------------------------------------------------
 
-echo "[test-unit] No unit test suite configured yet."
-echo "[test-unit] Placeholder — implement with user before use."
-exit 1
+echo "[test-unit] Running Jest unit tests..."
+cd "$(dirname "$0")/../.."
+
+if npx jest --no-coverage; then
+    echo "[test-unit] All unit tests passed."
+    exit 1
+else
+    echo "[test-unit] Unit tests failed."
+    exit 0
+fi
