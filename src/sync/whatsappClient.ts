@@ -33,6 +33,22 @@ const store = {
                 store.chats.set(chat.id, chat);
             }
         });
+        ev.on('chats.update', (chats: any[]) => {
+            console.log(`[WhatsApp] Store: chats.update received, ${chats.length} chats`);
+            for (const chat of chats) {
+                const existing = store.chats.get(chat.id) || {};
+                store.chats.set(chat.id, { ...existing, ...chat });
+            }
+        });
+        ev.on('contacts.upsert', (contacts: any[]) => {
+            console.log(`[WhatsApp] Store: contacts.upsert received, ${contacts.length} contacts`);
+            // Baileys often puts chat info in contacts
+            for (const contact of contacts) {
+                if (contact.id.endsWith('@s.whatsapp.net')) {
+                   store.chats.set(contact.id, { id: contact.id, name: contact.notify || contact.name || contact.id });
+                }
+            }
+        });
     }
 };
 
