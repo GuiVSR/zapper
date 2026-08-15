@@ -89,12 +89,13 @@ export function createApp(db: LocalDatabase, dbDir: string, syncEngine?: SyncEng
         });
 
         app.post('/api/sync', async (_req, res) => {
-            try {
-                const results = await syncEngine.syncAll();
-                res.json(results);
-            } catch (err: any) {
-                res.status(500).json({ error: err.message });
-            }
+            // Acknowledge the request immediately to avoid timeout
+            res.status(202).json({ status: 'Sync started in background' });
+            
+            // Run sync in the background
+            syncEngine.syncAll().catch(err => {
+                console.error('[Server] Background sync failed:', err);
+            });
         });
 
         app.get('/api/sync/state/:chatId', async (req, res) => {
