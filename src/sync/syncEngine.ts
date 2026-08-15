@@ -20,6 +20,16 @@ export class SyncEngine {
         if (!this.hasSynced && process.env.NODE_ENV !== 'test') {
             console.log('[SyncEngine] First sync detected, waiting 10s for WhatsApp client stabilization...');
             await new Promise(resolve => setTimeout(resolve, 10000));
+            
+            // Proactive check: see if the page context is alive
+            try {
+                await this.whatsapp.getChats(); // Just a ping to see if it's responsive
+                console.log('[SyncEngine] WhatsApp client ping successful.');
+            } catch (e) {
+                console.warn('[SyncEngine] Initial ping failed, waiting longer...');
+                await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+            
             this.hasSynced = true;
         }
     }
@@ -102,7 +112,9 @@ export class SyncEngine {
 
     async syncAll(): Promise<SyncResult[]> {
         await this.ensureClientStable();
+        console.log('[SyncEngine] Fetching chat list...');
         const chats = await this.retryWithBackoff(() => this.whatsapp.getChats());
+        console.log(`[SyncEngine] Retrieved ${chats.length} chats.`);
         const results: SyncResult[] = [];
 
         const chatIds = await this.db.listChatIds();
