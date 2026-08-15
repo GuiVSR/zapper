@@ -3,6 +3,7 @@ import * as baileys from '@whiskeysockets/baileys';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import pino from 'pino';
+import qrcode from 'qrcode-terminal';
 
 // Simple in-memory store
 const store = {
@@ -55,7 +56,7 @@ export class WhatsAppClient implements IWhatsAppClient {
             const { connection, lastDisconnect, qr } = update;
             if (qr) {
                 console.log('[WhatsApp] QR code received — scan with your phone');
-                // Baileys printQRInTerminal handles display, but we can also log it explicitly if needed
+                qrcode.generate(qr, { small: true });
             }
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== baileys.DisconnectReason.loggedOut;
