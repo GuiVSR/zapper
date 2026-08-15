@@ -103,9 +103,11 @@ export class WhatsAppClient implements IWhatsAppClient {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         
         // If store is empty, wait briefly as chats might still be loading
-        if (store.chats.size === 0) {
-            console.log('[WhatsApp] Store is empty, waiting 5s for chats to populate...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
+        const maxWait = 20000;
+        const start = Date.now();
+        while (store.chats.size === 0 && Date.now() - start < maxWait) {
+            console.log('[WhatsApp] Store is empty, waiting 1s for chats to populate...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
         
         const chats = store.allChats();
