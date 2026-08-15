@@ -86,6 +86,11 @@ export class SyncEngine {
         // Download last 100 chats first if database is empty
         const targetChats = isEmpty ? chats.slice(0, 100) : chats;
 
+        if (isEmpty) {
+            console.log('[SyncEngine] New database detected, waiting 5s for WhatsApp client stabilization...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+
         const bar = new ProgressBar('Syncing chats [:bar] :percent :etas', {
             total: targetChats.length,
             width: 40,
