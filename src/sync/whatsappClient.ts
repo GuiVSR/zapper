@@ -158,6 +158,11 @@ export class WhatsAppClient implements IWhatsAppClient {
         // Proactive cleanup
         await this.cleanupLockFile();
 
+        // Ensure no previous client instance exists
+        if (this.client) {
+            await this.destroy();
+        }
+
         this.buildClient();
 
         return new Promise<void>((resolve, reject) => {
@@ -211,7 +216,11 @@ export class WhatsAppClient implements IWhatsAppClient {
             this.reconnectTimeout = null;
         }
         if (this.client) {
-            await this.client.destroy();
+            try {
+                await this.client.destroy();
+            } catch (err) {
+                console.error('[WhatsApp] Error during destroy:', err);
+            }
             this.client = null;
             this.ready = false;
         }
