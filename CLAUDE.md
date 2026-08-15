@@ -22,10 +22,10 @@ are documented as runbooks in `.claude/runbooks/`. A runbook is a `.md` file who
 instructions MUST be followed in order when performing the described operation.
 Deviating from a runbook without updating it is a process violation.
 
-§3 — **Atomic Commits**: Every commit MUST be self-contained — it leaves the tree
-in a consistent state where all existing tests pass. A commit that introduces
-broken tests or regressions is invalid. Before committing, run the full unit
-test suite; the commit proceeds only on green.
+§3 — **Atomic Commits**: Every commit MUST be self-contained and conform to the
+procedures defined in `.claude/runbooks/atomic-commits.md`. It must leave the
+tree in a consistent state where compilation succeeds and all tests pass.
+Bypassing commit hooks or committing broken code is a process violation.
 
 §4 — **Test Gating**: A "test" is a verifiable, repeatable assertion about
 system behaviour. Test types and their execution procedures are defined in the
@@ -53,6 +53,7 @@ lacks a corresponding cURL entry is considered undocumented.
 | Data Generation | `.claude/runbooks/data-generation.md` | Seed and fixture generation procedures for `tmp/db/` |
 | Smoke Tests | `.claude/runbooks/smoke-tests.md` | Fast server-alive checks — gatekeeper for all other test tiers |
 | Scripts | `.claude/runbooks/scripts.md` | Script creation conventions, exit codes, and automation triggers |
+| Atomic Commits | `.claude/runbooks/atomic-commits.md` | Step-by-step procedures for creating atomic, self-contained, and valid commits |
 
 ---
 

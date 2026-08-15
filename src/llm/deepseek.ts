@@ -2,12 +2,11 @@ import {
     DEEPSEEK_BASE_URL,
     DEEPSEEK_DEFAULT_MODEL,
     DEFAULT_TEMPERATURE,
-    DEFAULT_MAX_TOKENS,
     getSystemPrompt,
     getMaxDraftParts,
     IMAGE_ANALYSIS_PROMPT,
 } from '../constants';
-import { parsePartsResponse, buildConversationText } from './groq';
+import { parsePartsResponse, buildConversationText } from './utils';
 import { debugPrompt, debugResponse } from '../debug';
 
 export interface DeepSeekMessage {
@@ -29,7 +28,7 @@ interface DeepSeekResponse {
         message: DeepSeekMessage;
         finish_reason: string;
     }>;
-    usage: {
+    usage?: {
         prompt_tokens: number;
         completion_tokens: number;
         total_tokens: number;
@@ -37,7 +36,7 @@ interface DeepSeekResponse {
     error?: { message: string; type: string; code: string };
 }
 
-class DeepSeekClient {
+export class DeepSeekClient {
     private apiKey: string;
     private model: string;
 
@@ -128,6 +127,7 @@ class DeepSeekClient {
                 },
             ],
             {
+                model:       activeModel,
                 max_tokens:  process.env.DEEPSEEK_MAX_TOKENS  ? parseInt(process.env.DEEPSEEK_MAX_TOKENS)  : undefined,
                 temperature: process.env.DEEPSEEK_TEMPERATURE ? parseFloat(process.env.DEEPSEEK_TEMPERATURE) : undefined,
             }

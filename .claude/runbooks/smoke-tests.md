@@ -22,6 +22,7 @@ other testing tier runs.
 
 - Server running on `http://localhost:3000` (`npm run build && npm start`)
 - `curl` available on PATH
+- `python3` available on PATH (for JSON parsing; no `jq` dependency)
 
 ---
 
@@ -136,102 +137,73 @@ curl -s 'http://localhost:3000/api/conversations/0000000000000' | \
 
 ---
 
+---
+
+### S8 — Sync single chat endpoint exists
+
+The POST /api/sync/:chatId endpoint returns valid JSON. When WhatsApp is not
+enabled, a 404 is expected and treated as a pass.
+
+```bash
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST 'http://localhost:3000/api/sync/5511999999999')
+# 200 (sync enabled) or 404 (sync disabled) both pass
+```
+
+**Pass**: HTTP status 200 with `{"chatId","processed","skipped"}` shape, or 404.
+**Fail**: Any other status code, or 200 with invalid response shape.
+
+---
+
+### S9 — Sync all endpoint exists
+
+The POST /api/sync endpoint returns a JSON array. When WhatsApp is not enabled,
+a 404 is expected and treated as a pass.
+
+```bash
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST 'http://localhost:3000/api/sync')
+# 200 (sync enabled) or 404 (sync disabled) both pass
+```
+
+**Pass**: HTTP status 200 with JSON array, or 404.
+**Fail**: Any other status code, or 200 with non-array response.
+
+---
+
+### S10 — Sync state endpoint exists
+
+The GET /api/sync/state/:chatId endpoint returns valid JSON with cursor and
+messageCount. When WhatsApp is not enabled, a 404 is expected and treated as a pass.
+
+```bash
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  'http://localhost:3000/api/sync/state/5511999999999')
+# 200 (sync enabled) or 404 (sync disabled) both pass
+```
+
+**Pass**: HTTP status 200 with `{"chatId","messageCount"}` shape, or 404.
+**Fail**: Any other status code, or 200 with invalid response shape.
+
+---
+
 ## Full smoke suite script
 
-Save as `.claude/scripts/smoke.sh`:
+The smoke suite is implemented in `.claude/scripts/smoke.sh`. Run it with:
 
 ```bash
-#!/usr/bin/env bash
-# smoke.sh — Smoke test suite for Zapper.
-#
-# Exit codes (tester subagent convention):
-#   0 — one or more smoke tests failed
-#   1 — all smoke tests passed
-set -euo pipefail
-
-BASE_URL="${ZAPPER_URL:-http://localhost:3000}"
-FAILURES=0
-CHAT_ID="5511999999999"
-
-pass() { echo "  PASS: $1"; }
-fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
-
-echo "[smoke] Zapper smoke tests — $(date)"
-
-# S1 — Server alive
-echo "[smoke] S1: Server alive"
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/conversations" 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "200" ]; then pass "S1"; else fail "S1 (got $HTTP_CODE)"; fi
-
-# S2 — Valid JSON
-echo "[smoke] S2: Conversations is valid JSON"
-if curl -s "$BASE_URL/api/conversations" | jq -e 'type == "array"' > /dev/null 2>&1; then
-  pass "S2"
-else
-  fail "S2 (response is not a JSON array)"
-fi
-
-# S3 — Create message
-echo "[smoke] S3: Create message"
-SMOKE_ID="smoke-$(date +%s)"
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-  -X POST "$BASE_URL/api/conversations/$CHAT_ID/messages" \
-  --header 'Content-Type: application/json' \
-  --data "{\"id\":\"$SMOKE_ID\",\"timestamp\":$(date +%s000),\"body\":\"smoke test\",\"type\":\"text\",\"senderType\":\"customer\"}" 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "201" ]; then pass "S3"; else fail "S3 (got $HTTP_CODE)"; fi
-
-# S4 — Read back message
-echo "[smoke] S4: Read back message"
-if curl -s "$BASE_URL/api/conversations/$CHAT_ID" | jq -e '.messages | map(select(.id | startswith("smoke-"))) | length > 0' > /dev/null 2>&1; then
-  pass "S4"
-else
-  fail "S4 (message not found)"
-fi
-
-# S5 — Update message
-echo "[smoke] S5: Update message"
-SMOKE_ID=$(curl -s "$BASE_URL/api/conversations/$CHAT_ID" | jq -r '.messages[0].id')
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-  -X PATCH "$BASE_URL/api/conversations/$CHAT_ID/messages/$SMOKE_ID" \
-  --header 'Content-Type: application/json' \
-  --data '{"body":"smoke test updated"}' 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "200" ]; then pass "S5"; else fail "S5 (got $HTTP_CODE)"; fi
-
-# S6 — Reject invalid message
-echo "[smoke] S6: Reject invalid message"
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-  -X POST "$BASE_URL/api/conversations/$CHAT_ID/messages" \
-  --header 'Content-Type: application/json' \
-  --data '{"body":"missing fields"}' 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "400" ]; then pass "S6"; else fail "S6 (got $HTTP_CODE)"; fi
-
-# S7 — Non-existent conversation returns empty
-echo "[smoke] S7: Non-existent conversation returns empty"
-if curl -s "$BASE_URL/api/conversations/0000000000000" | jq -e '.chatId == "0000000000000" and .messages == []' > /dev/null 2>&1; then
-  pass "S7"
-else
-  fail "S7"
-fi
-
-# Cleanup smoke data
-rm -f tmp/db/${CHAT_ID}.json
-
-# Verdict
-echo ""
-if [ "$FAILURES" -eq 0 ]; then
-  echo "[smoke] All smoke tests passed."
-  exit 1
-else
-  echo "[smoke] $FAILURES smoke test(s) failed."
-  exit 0
-fi
+bash .claude/scripts/smoke.sh
 ```
 
-Make it executable after creation:
+Or against a custom server:
 
 ```bash
-chmod +x .claude/scripts/smoke.sh
+ZAPPER_URL=http://localhost:4000 bash .claude/scripts/smoke.sh
 ```
+
+See `.claude/scripts/smoke.sh` for the full implementation. The script uses
+`python3` for JSON parsing (no `jq` dependency) and follows the script
+conventions in `.claude/runbooks/scripts.md`.
 
 ---
 
