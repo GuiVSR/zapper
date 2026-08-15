@@ -74,6 +74,13 @@ export class WhatsAppClient implements IWhatsAppClient {
             this.ready = false;
             await this.saveState('disconnected');
             console.log(`[WhatsApp] Disconnected: ${reason}`);
+
+            // If we logged out, we should NOT auto-reconnect, as the session is invalid.
+            if (reason === 'LOGOUT') {
+                console.log('[WhatsApp] Client logged out, stopping auto-reconnect.');
+                return; 
+            }
+
             this.scheduleReconnect();
         });
 
@@ -218,7 +225,23 @@ export class WhatsAppClient implements IWhatsAppClient {
         if (!this.client) {
             throw new Error('WhatsApp client not initialized');
         }
-        return this.client.getChats();
+        return this.retryWithBackoff(() => this.client.getChats());
+    }
+
+    private async retryWithBackoff<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+        for (let i = 0; i < retries; i++) {
+            try {
+                return await fn();
+            } catch (err: any) {
+                if (err.message.includes('detached Frame') && i < retries - 1) {
+                    console.warn(`[WhatsApp] Detached Frame error, retrying (${i + 1}/${retries})...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Exponential backoff
+                    continue;
+                }
+                throw err;
+            }
+        }
+        return await fn();
     }
 
     async fetchMessages(chatId: string, limit: number): Promise<RawWhatsAppMessage[]> {
