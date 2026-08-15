@@ -44,6 +44,7 @@ export class SyncEngine {
                     await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Exponential backoff
                     continue;
                 }
+                console.error('[SyncEngine] Full error object:', err);
                 throw err;
             }
         }
