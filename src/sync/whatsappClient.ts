@@ -235,7 +235,13 @@ export class WhatsAppClient implements IWhatsAppClient {
             throw new Error('WhatsApp client not initialized');
         }
         console.log('[WhatsApp] Fetching chats from client...');
-        const chats: any[] = await this.retryWithBackoff(() => this.client.getChats());
+        
+        // Add a timeout to the getChats call to prevent hanging
+        const chats: any[] = await this.retryWithBackoff(() => Promise.race([
+            this.client.getChats(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('getChats timed out')), 20000))
+        ]));
+        
         console.log(`[WhatsApp] Successfully retrieved ${chats.length} chats.`);
         return chats;
     }
