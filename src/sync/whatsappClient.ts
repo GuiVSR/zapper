@@ -61,12 +61,14 @@ export class WhatsAppClient implements IWhatsAppClient {
         
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
             const { connection, lastDisconnect, qr } = update;
+            console.log(`[WhatsApp] Connection update: ${connection}`);
             if (qr) {
                 console.log('[WhatsApp] QR code received — scan with your phone');
                 qrcode.generate(qr, { small: true });
             }
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== baileys.DisconnectReason.loggedOut;
+                console.log(`[WhatsApp] Connection closed, shouldReconnect: ${shouldReconnect}`);
                 this.ready = false;
                 if (shouldReconnect) this.connect();
             } else if (connection === 'open') {
