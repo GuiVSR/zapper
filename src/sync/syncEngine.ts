@@ -1,8 +1,6 @@
 import { IWhatsAppClient, RawWhatsAppMessage, SyncResult, SyncState } from './types';
 import { LocalDatabase, Message, SenderType } from '../db/localDb';
 import { MessageProcessor, IncomingMessageInput } from '../messaging/messageProcessor';
-// @ts-ignore
-import ProgressBar = require('progress');
 
 const WINDOW = 100;
 
@@ -86,17 +84,14 @@ export class SyncEngine {
         // Download last 100 chats first if database is empty
         const targetChats = isEmpty ? chats.slice(0, 100) : chats;
 
-        const bar = new ProgressBar('Syncing chats [:bar] :percent :etas', {
-            total: targetChats.length,
-            width: 40,
-        });
-
-        for (const chat of targetChats) {
+        for (let i = 0; i < targetChats.length; i++) {
+            const chat = targetChats[i];
             const chatId = chat.id?._serialized ?? chat.id ?? chat.name;
             if (!chatId) {
-                bar.tick();
                 continue;
             }
+
+            console.log(`[SyncEngine] Downloading conversation (${i + 1}/${targetChats.length}): ${chatId}`);
 
             const limit = isEmpty ? 100 : 1000;
             try {
@@ -110,7 +105,6 @@ export class SyncEngine {
                     skipped: 0,
                 });
             }
-            bar.tick();
         }
 
         return results;
