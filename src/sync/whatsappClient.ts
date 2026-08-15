@@ -58,8 +58,9 @@ export class WhatsAppClient implements IWhatsAppClient {
             authStrategy: new LocalAuth({ dataPath: './tmp/wweb_auth' }),
             puppeteer: {
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-extensions'],
             },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
             deviceName: 'zapper',
             browserName: 'zapper',
         });
