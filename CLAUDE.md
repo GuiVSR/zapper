@@ -51,6 +51,9 @@ lacks a corresponding cURL entry is considered undocumented.
 | Testing | `.claude/runbooks/testing.md` | Test types, scripts, exit code convention, and tester subagent verdict rules |
 | cURLs | `.claude/runbooks/curl.md` | Canonical HTTP request references for every API endpoint |
 | Data Generation | `.claude/runbooks/data-generation.md` | Seed and fixture generation procedures for `tmp/db/` |
+| Full Reset | `.claude/runbooks/full-reset.md` | Procedures to revert to a clean, just-cloned state |
+| Reset App State | `.claude/runbooks/reset-app-state.md` | Procedures to wipe database and WhatsApp session data |
+| Running | `.claude/runbooks/running.md` | Procedures to start, authenticate, and run the server |
 | Smoke Tests | `.claude/runbooks/smoke-tests.md` | Fast server-alive checks — gatekeeper for all other test tiers |
 | Scripts | `.claude/runbooks/scripts.md` | Script creation conventions, exit codes, and automation triggers |
 | Atomic Commits | `.claude/runbooks/atomic-commits.md` | Step-by-step procedures for creating atomic, self-contained, and valid commits |
