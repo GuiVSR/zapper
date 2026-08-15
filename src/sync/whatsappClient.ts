@@ -77,10 +77,12 @@ export class WhatsAppClient implements IWhatsAppClient {
         store.bind(this.socket.ev);
         this.socket.ev.on('creds.update', saveCreds);
 
-        // Explicitly subscribe to more events to debug
-        (this.socket.ev as any).on('chats.set', () => console.log(`[WhatsApp] DEBUG: chats.set received`));
-        (this.socket.ev as any).on('contacts.set', () => console.log(`[WhatsApp] DEBUG: contacts.set received`));
-        
+        // Debug all events
+        this.socket.ev.process((events) => {
+            if (events['chats.set']) console.log(`[WhatsApp] DEBUG: chats.set received`);
+            if (events['contacts.set']) console.log(`[WhatsApp] DEBUG: contacts.set received`);
+            if (events['messages.upsert']) console.log(`[WhatsApp] DEBUG: messages.upsert received`);
+        });        
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
             console.log('[WhatsApp] Full update object:', JSON.stringify(update, (key, value) => 
                 key === 'lastDisconnect' ? undefined : value, 2));
