@@ -13,6 +13,7 @@ const store = {
     loadMessages: (chatId: string, limit: number) => store.messages.get(chatId)?.slice(-limit) || [],
     bind: (ev: any) => {
         ev.on('messages.upsert', (m: any) => {
+            console.log(`[WhatsApp] Store: messages.upsert received, ${m.messages.length} messages`);
             for (const msg of m.messages) {
                 const chatId = msg.key.remoteJid!;
                 const msgs = store.messages.get(chatId) || [];
@@ -21,13 +22,13 @@ const store = {
             }
         });
         ev.on('chats.set', (chats: any[]) => {
-            console.log(`[WhatsApp] Store: Initial set of ${chats.length} chats received`);
+            console.log(`[WhatsApp] Store: chats.set received, ${chats.length} chats`);
             for (const chat of chats) {
                 store.chats.set(chat.id, chat);
             }
         });
         ev.on('chats.upsert', (chats: any[]) => {
-            console.log(`[WhatsApp] Store: ${chats.length} chats upserted`);
+            console.log(`[WhatsApp] Store: chats.upsert received, ${chats.length} chats`);
             for (const chat of chats) {
                 store.chats.set(chat.id, chat);
             }
@@ -46,6 +47,7 @@ export class WhatsAppClient implements IWhatsAppClient {
         this.logger = pino({ level: 'silent' });
     }
 
+
     async connect(): Promise<void> {
         const { state, saveCreds } = await baileys.useMultiFileAuthState(this.authDir);
 
@@ -58,6 +60,11 @@ export class WhatsAppClient implements IWhatsAppClient {
 
         store.bind(this.socket.ev);
         this.socket.ev.on('creds.update', saveCreds);
+
+        // Debug all events
+        this.socket.ev.process((events) => {
+             // Optional: log specific events for debugging if needed
+        });
         
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
             console.log('[WhatsApp] Full update object:', JSON.stringify(update, (key, value) => 
@@ -94,12 +101,21 @@ export class WhatsAppClient implements IWhatsAppClient {
 
     async getChats(): Promise<any[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
-        return store.allChats();
+        
+        // If store is empty, wait briefly as chats might still be loading
+        if (store.chats.size === 0) {
+            console.log('[WhatsApp] Store is empty, waiting 5s for chats to populate...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+        
+        const chats = store.allChats();
+        console.log(`[WhatsApp] getChats returning ${chats.length} chats`);
+        return chats;
     }
 
     async fetchMessages(chatId: string, limit: number): Promise<RawWhatsAppMessage[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
-        const messages = store.loadMessages(chatId, limit);
+        const messages = store.loadMessages(chatId);
         
         return messages.map((msg: any): RawWhatsAppMessage => ({
             id: msg.key.id!,
