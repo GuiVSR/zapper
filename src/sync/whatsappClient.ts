@@ -20,7 +20,14 @@ const store = {
                 store.messages.set(chatId, msgs);
             }
         });
+        ev.on('chats.set', (chats: any[]) => {
+            console.log(`[WhatsApp] Store: Initial set of ${chats.length} chats received`);
+            for (const chat of chats) {
+                store.chats.set(chat.id, chat);
+            }
+        });
         ev.on('chats.upsert', (chats: any[]) => {
+            console.log(`[WhatsApp] Store: ${chats.length} chats upserted`);
             for (const chat of chats) {
                 store.chats.set(chat.id, chat);
             }
