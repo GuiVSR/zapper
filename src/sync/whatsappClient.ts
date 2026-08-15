@@ -12,6 +12,9 @@ const store = {
     allChats: () => Array.from(store.chats.values()),
     loadMessages: (chatId: string, limit: number) => store.messages.get(chatId)?.slice(-limit) || [],
     bind: (ev: any) => {
+        ev.on('history-sync', (data: any) => {
+            console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}. Messages in batch: ${data.messages?.length || 0}`);
+        });
         ev.on('messages.upsert', (m: any) => {
             console.log(`[WhatsApp] Store: messages.upsert received, ${m.messages.length} messages`);
             for (const msg of m.messages) {
