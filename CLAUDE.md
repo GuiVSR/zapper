@@ -54,7 +54,7 @@ lacks a corresponding cURL entry is considered undocumented.
 | Full Reset | `.claude/runbooks/full-reset.md` | Procedures to revert to a clean, just-cloned state |
 | Reset App State | `.claude/runbooks/reset-app-state.md` | Procedures to wipe database and WhatsApp session data |
 | Running | `.claude/runbooks/running.md` | Procedures to start, authenticate, and run the server |
-| Smoke Tests | `.claude/runbooks/smoke-tests.md` | Fast server-alive checks — gatekeeper for all other test tiers |
+| Syncing | `.claude/runbooks/syncing.md` | Synchronization procedures and historical data limitations |
 | Scripts | `.claude/runbooks/scripts.md` | Script creation conventions, exit codes, and automation triggers |
 | Atomic Commits | `.claude/runbooks/atomic-commits.md` | Step-by-step procedures for creating atomic, self-contained, and valid commits |
 
@@ -70,3 +70,8 @@ To add, remove, or modify an axiom:
 3. Document the axiom in this file with a unique § number.
 4. Renumbering is permitted only when an axiom is removed — do not reassign an
    existing § number to a new axiom.
+
+---
+
+## Agent Acknowledgment
+The agent has received, read, and internalized these axioms.
