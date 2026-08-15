@@ -8,11 +8,20 @@ export class SyncEngine {
     private db: LocalDatabase;
     private whatsapp: IWhatsAppClient;
     private processor: MessageProcessor;
+    private hasSynced = false;
 
     constructor(db: LocalDatabase, whatsapp: IWhatsAppClient, processor: MessageProcessor) {
         this.db = db;
         this.whatsapp = whatsapp;
         this.processor = processor;
+    }
+
+    private async ensureClientStable(): Promise<void> {
+        if (!this.hasSynced && process.env.NODE_ENV !== 'test') {
+            console.log('[SyncEngine] First sync detected, waiting 10s for WhatsApp client stabilization...');
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            this.hasSynced = true;
+        }
     }
 
     private async retryWithBackoff<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -92,7 +101,8 @@ export class SyncEngine {
     }
 
     async syncAll(): Promise<SyncResult[]> {
-        const chats = await this.whatsapp.getChats();
+        await this.ensureClientStable();
+        const chats = await this.retryWithBackoff(() => this.whatsapp.getChats());
         const results: SyncResult[] = [];
 
         const chatIds = await this.db.listChatIds();
@@ -108,7 +118,10 @@ export class SyncEngine {
                 continue;
             }
 
-            console.log(`[SyncEngine] Downloading conversation (${i + 1}/${targetChats.length}): ${chatId}`);
+            // In test environment, skip excessive logging to avoid leaking handles
+            if (process.env.NODE_ENV !== 'test') {
+                console.log(`[SyncEngine] Downloading conversation (${i + 1}/${targetChats.length}): ${chatId}`);
+            }
 
             const limit = isEmpty ? 100 : 1000;
             try {
