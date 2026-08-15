@@ -60,8 +60,10 @@ export class WhatsAppClient implements IWhatsAppClient {
         this.socket.ev.on('creds.update', saveCreds);
         
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
+            console.log('[WhatsApp] Full update object:', JSON.stringify(update, (key, value) => 
+                key === 'lastDisconnect' ? undefined : value, 2));
+            
             const { connection, lastDisconnect, qr } = update;
-            console.log(`[WhatsApp] Connection update: ${connection}`);
             if (qr) {
                 console.log('[WhatsApp] QR code received — scan with your phone');
                 qrcode.generate(qr, { small: true });
