@@ -15,7 +15,24 @@ export class SyncEngine {
         this.processor = processor;
     }
 
+    private async retryWithBackoff<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+        for (let i = 0; i < retries; i++) {
+            try {
+                return await fn();
+            } catch (err: any) {
+                if (err.message.includes('detached Frame') && i < retries - 1) {
+                    console.warn(`[SyncEngine] Detached Frame error, retrying (${i + 1}/${retries})...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1))); // Exponential backoff
+                    continue;
+                }
+                throw err;
+            }
+        }
+        return await fn();
+    }
+
     async syncChat(chatId: string, maxMessages = 1000): Promise<SyncResult> {
+        // ... (rest of function unchanged, but now calls to whatsapp.fetchMessages and downloadMedia need to be wrapped)
         const stored = await this.db.getConversation(chatId);
         const storedIds = new Set(stored.messages.map(m => m.id));
 
@@ -27,7 +44,7 @@ export class SyncEngine {
 
         for (let batchNum = 0; batchNum < maxBatches; batchNum++) {
             const currentLimit = (batchNum + 1) * WINDOW;
-            const messages = await this.whatsapp.fetchMessages(chatId, currentLimit);
+            const messages = await this.retryWithBackoff(() => this.whatsapp.fetchMessages(chatId, currentLimit));
             fetchedTotal = messages.length;
 
             if (messages.length === 0) {
@@ -135,7 +152,7 @@ export class SyncEngine {
 
         // Download media for transcription / image analysis
         if (raw.hasMedia) {
-            const media = await this.whatsapp.downloadMedia(chatId, raw.id);
+            const media = await this.retryWithBackoff(() => this.whatsapp.downloadMedia(chatId, raw.id));
             if (media) {
                 input.media = {
                     data: media.data,
