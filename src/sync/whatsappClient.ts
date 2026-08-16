@@ -145,8 +145,12 @@ export class WhatsAppClient implements IWhatsAppClient {
 
     async fetchMessages(chatId: string, limit: number): Promise<RawWhatsAppMessage[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
-        const messages = store.loadMessages(chatId, limit);
         
+        // Load all messages from the store, not just the slice
+        const allMessages = store.messages.get(chatId) || [];
+        console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) - Total in store: ${allMessages.length}`);
+        
+        const messages = allMessages.slice(-limit);
         console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) returning ${messages.length} messages`);
         
         return messages.map((msg: any): RawWhatsAppMessage => ({
