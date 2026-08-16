@@ -10,10 +10,28 @@ const store = {
     chats: new Map<string, any>(),
     messages: new Map<string, any[]>(),
     allChats: () => Array.from(store.chats.values()),
-    loadMessages: (chatId: string, limit: number) => store.messages.get(chatId)?.slice(-limit) || [],
+    loadMessages: (chatId: string, limit: number) => {
+        const msgs = store.messages.get(chatId) || [];
+        console.log(`[WhatsApp] Store: Loading messages for ${chatId}. Total in store: ${msgs.length}`);
+        return msgs.slice(-limit);
+    },
     bind: (ev: any) => {
         ev.on('history-sync', (data: any) => {
-            console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}. Messages in batch: ${data.messages?.length || 0}`);
+            console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}`);
+            // history-sync data often contains 'conversations' which contain messages
+            if (data.conversations) {
+                for (const convo of data.conversations) {
+                    if (convo.messages) {
+                        const chatId = convo.id;
+                        const msgs = store.messages.get(chatId) || [];
+                        for (const m of convo.messages) {
+                            if (m.message) msgs.push(m.message);
+                        }
+                        store.messages.set(chatId, msgs);
+                        console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId} from history-sync`);
+                    }
+                }
+            }
             if (data.messages) {
                 for (const msg of data.messages) {
                     const chatId = msg.key.remoteJid!;
@@ -149,23 +167,26 @@ export class WhatsAppClient implements IWhatsAppClient {
     async fetchMessages(chatId: string, limit: number): Promise<RawWhatsAppMessage[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         
-        // Load all messages from the store, not just the slice
         const allMessages = store.messages.get(chatId) || [];
         console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) - Total in store: ${allMessages.length}`);
         
         const messages = allMessages.slice(-limit);
-        console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) returning ${messages.length} messages`);
         
-        return messages.map((msg: any): RawWhatsAppMessage => ({
-            id: msg.key.id!,
-            timestamp: Number(msg.messageTimestamp) * 1000,
-            body: msg.message?.conversation || msg.message?.extendedTextMessage?.text || '',
-            type: msg.message?.conversation ? 'chat' : 'media', // Simplified
-            fromMe: msg.key.fromMe ?? false,
-            hasMedia: !!(msg.message?.imageMessage || msg.message?.audioMessage || msg.message?.videoMessage),
-            from: msg.key.remoteJid ?? '',
-            to: msg.key.remoteJid ?? '',
-        }));
+        return messages.map((msg: any): RawWhatsAppMessage => {
+            // Use Baileys helper to extract content
+            const content = baileys.extractMessageContent(msg.message);
+            
+            return {
+                id: msg.key.id!,
+                timestamp: Number(msg.messageTimestamp) * 1000,
+                body: content?.conversation || content?.extendedTextMessage?.text || content?.imageMessage?.caption || '',
+                type: content?.conversation ? 'chat' : 'media', // Simplified
+                fromMe: msg.key.fromMe ?? false,
+                hasMedia: !!(content?.imageMessage || content?.audioMessage || content?.videoMessage),
+                from: msg.key.remoteJid ?? '',
+                to: msg.key.remoteJid ?? '',
+            };
+        });
     }
 
     async downloadMedia(chatId: string, messageId: string): Promise<{ mimetype: string; data: string } | null> {
