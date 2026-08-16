@@ -75,7 +75,7 @@ export class WhatsAppClient implements IWhatsAppClient {
             printQRInTerminal: true,
             logger: this.logger,
             browser: ["Chrome", "Ubuntu", "1.0.0"],
-            syncFullHistory: false
+            syncFullHistory: true
         });
 
         store.bind(this.socket.ev);
