@@ -17,21 +17,10 @@ export class SyncEngine {
     }
 
     private async ensureClientStable(): Promise<void> {
-        if (!this.hasSynced && process.env.NODE_ENV !== 'test') {
-            console.log('[SyncEngine] First sync detected, waiting 10s for WhatsApp client stabilization...');
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            
-            // Proactive check: see if the page context is alive
-            try {
-                await this.whatsapp.getChats(); // Just a ping to see if it's responsive
-                console.log('[SyncEngine] WhatsApp client ping successful.');
-            } catch (e) {
-                console.warn('[SyncEngine] Initial ping failed, waiting longer...');
-                await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-            
-            this.hasSynced = true;
-        }
+        // Removed 10s wait and ping logic.
+        // If the store is empty, it means we have no data to sync yet.
+        // SyncEngine should not artificially delay if data is not present.
+        this.hasSynced = true;
     }
 
     private async retryWithBackoff<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -51,7 +40,7 @@ export class SyncEngine {
         return await fn();
     }
 
-    async syncChat(chatId: string, maxMessages = 1000): Promise<SyncResult> {
+    async syncChat(chatId: string, maxMessages = 1000, startDate?: number): Promise<SyncResult> {
         // ... (rest of function unchanged, but now calls to whatsapp.fetchMessages and downloadMedia need to be wrapped)
         const stored = await this.db.getConversation(chatId);
         const storedIds = new Set(stored.messages.map(m => m.id));
@@ -76,10 +65,26 @@ export class SyncEngine {
                 newestMessageId = messages[0].id;
             }
 
-            const newMessages = messages.filter(m => !storedIds.has(m.id));
+            // Filter out already stored messages
+            let newMessages = messages.filter(m => !storedIds.has(m.id));
+
+            // Apply start date filter
+            if (startDate) {
+                newMessages = newMessages.filter(m => m.timestamp >= startDate);
+            }
 
             if (newMessages.length === 0) {
-                break; // overlap found — we've caught up with stored data
+                // If we hit overlap or old messages, we might not want to stop immediately if we are filtering by date
+                // But the current logic assumes we are fetching from newest to oldest.
+                // If we hit a message older than startDate, we can stop processing this chat.
+                
+                // Let's check if we have any messages older than startDate
+                const hasOlder = messages.some(m => m.timestamp < (startDate || 0));
+                if (hasOlder) break;
+
+                // Otherwise continue to next batch
+                if (messages.length < currentLimit) break;
+                continue;
             }
 
             // Process oldest-first (WhatsApp returns newest-first)
@@ -111,18 +116,21 @@ export class SyncEngine {
         };
     }
 
-    async syncAll(): Promise<SyncResult[]> {
+    async syncAll(startDate?: number): Promise<SyncResult[]> {
         await this.ensureClientStable();
         console.log('[SyncEngine] Fetching chat list...');
         const chats = await this.retryWithBackoff(() => this.whatsapp.getChats());
+        
+        if (chats.length === 0) {
+            console.warn('[SyncEngine] No chats found in store. Sync aborted.');
+            return [];
+        }
+        
         console.log(`[SyncEngine] Retrieved ${chats.length} chats.`);
         const results: SyncResult[] = [];
 
-        const chatIds = await this.db.listChatIds();
-        const isEmpty = chatIds.length === 0;
-
-        // Download last 100 chats first if database is empty
-        const targetChats = isEmpty ? chats.slice(0, 100) : chats;
+        // Apply 100 chat limit only if NOT performing a targeted date sync
+        const targetChats = startDate ? chats : chats.slice(0, 100);
 
         for (let i = 0; i < targetChats.length; i++) {
             const chat = targetChats[i];
@@ -136,9 +144,8 @@ export class SyncEngine {
                 console.log(`[SyncEngine] Downloading conversation (${i + 1}/${targetChats.length}): ${chatId}`);
             }
 
-            const limit = isEmpty ? 100 : 1000;
             try {
-                const result = await this.syncChat(chatId, limit);
+                const result = await this.syncChat(chatId, 1000, startDate);
                 results.push(result);
             } catch (err: any) {
                 console.error(`[SyncEngine] Failed to sync chat ${chatId}:`, err.message ?? err);

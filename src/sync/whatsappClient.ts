@@ -74,7 +74,8 @@ export class WhatsAppClient implements IWhatsAppClient {
             auth: state,
             printQRInTerminal: true,
             logger: this.logger,
-            browser: ['zapper', 'Chrome', '126.0.0.0']
+            browser: baileys.Browsers.ubuntu('Chrome'),
+            syncFullHistory: false
         });
 
         store.bind(this.socket.ev);
@@ -88,8 +89,9 @@ export class WhatsAppClient implements IWhatsAppClient {
             if (e['messages.upsert']) console.log(`[WhatsApp] DEBUG: messages.upsert received`);
         });        
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
-            console.log('[WhatsApp] Full update object:', JSON.stringify(update, (key, value) => 
-                key === 'lastDisconnect' ? undefined : value, 2));
+            // Log the update but specifically try to catch the error detail
+            console.log('[WhatsApp] Connection update:', JSON.stringify(update, (key, value) => 
+                key === 'lastDisconnect' ? value : value, 2));
             
             const { connection, lastDisconnect, qr } = update;
             if (qr) {
@@ -97,7 +99,11 @@ export class WhatsAppClient implements IWhatsAppClient {
                 qrcode.generate(qr, { small: true });
             }
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== baileys.DisconnectReason.loggedOut;
+                // Log the full error object for better debugging
+                const error = (lastDisconnect?.error as any);
+                console.error('[WhatsApp] Connection closed details:', JSON.stringify(error, null, 2));
+                
+                const shouldReconnect = error?.output?.statusCode !== baileys.DisconnectReason.loggedOut;
                 console.log(`[WhatsApp] Connection closed, shouldReconnect: ${shouldReconnect}`);
                 this.ready = false;
                 if (shouldReconnect) this.connect();
@@ -123,14 +129,8 @@ export class WhatsAppClient implements IWhatsAppClient {
     async getChats(): Promise<any[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         
-        // If store is empty, wait briefly as chats might still be loading
-        const maxWait = 20000;
-        const start = Date.now();
-        while (store.chats.size === 0 && Date.now() - start < maxWait) {
-            console.log('[WhatsApp] Store is empty, waiting 1s for chats to populate...');
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        
+        // Removed the artificial wait loop. 
+        // If the store is empty, return what we have (even if empty).
         const chats = store.allChats();
         console.log(`[WhatsApp] getChats returning ${chats.length} chats`);
         return chats;

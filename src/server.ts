@@ -14,7 +14,7 @@ export function createApp(db: LocalDatabase, dbDir: string, syncEngine?: SyncEng
             await fs.mkdir(dbDir, { recursive: true });
             const files = await fs.readdir(dbDir);
             const chatIds = files
-                .filter(f => f.endsWith('.json'))
+                .filter(f => f.endsWith('.json') && f !== 'cursors.json' && f !== 'status@broadcast.json')
                 .map(f => f.replace(/\.json$/, ''));
             res.json(chatIds);
         } catch (err: any) {
@@ -88,12 +88,24 @@ export function createApp(db: LocalDatabase, dbDir: string, syncEngine?: SyncEng
             }
         });
 
-        app.post('/api/sync', async (_req, res) => {
+        app.post('/api/sync', async (req, res) => {
+            let { startDate } = req.body;
+
+            // Convert YYYY-MM-DD string to timestamp if necessary
+            if (typeof startDate === 'string') {
+                const date = new Date(startDate);
+                if (isNaN(date.getTime())) {
+                    res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+                    return;
+                }
+                startDate = date.getTime();
+            }
+
             // Acknowledge the request immediately to avoid timeout
             res.status(202).json({ status: 'Sync started in background' });
             
             // Run sync in the background
-            syncEngine.syncAll().catch(err => {
+            syncEngine.syncAll(startDate).catch(err => {
                 console.error('[Server] Background sync failed:', err);
             });
         });
