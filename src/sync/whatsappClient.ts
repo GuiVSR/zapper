@@ -14,6 +14,14 @@ const store = {
     bind: (ev: any) => {
         ev.on('history-sync', (data: any) => {
             console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}. Messages in batch: ${data.messages?.length || 0}`);
+            if (data.messages) {
+                for (const msg of data.messages) {
+                    const chatId = msg.key.remoteJid!;
+                    const msgs = store.messages.get(chatId) || [];
+                    msgs.push(msg);
+                    store.messages.set(chatId, msgs);
+                }
+            }
         });
         ev.on('messages.upsert', (m: any) => {
             console.log(`[WhatsApp] Store: messages.upsert received, ${m.messages.length} messages`);
