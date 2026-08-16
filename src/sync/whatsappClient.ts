@@ -147,6 +147,8 @@ export class WhatsAppClient implements IWhatsAppClient {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         const messages = store.loadMessages(chatId, limit);
         
+        console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) returning ${messages.length} messages`);
+        
         return messages.map((msg: any): RawWhatsAppMessage => ({
             id: msg.key.id!,
             timestamp: Number(msg.messageTimestamp) * 1000,
