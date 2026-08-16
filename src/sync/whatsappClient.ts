@@ -34,8 +34,10 @@ const store = {
             }
         });
         ev.on('chats.set', (data: any) => {
-            console.log(`[WhatsApp] Store: chats.set received, ${data.length} chats`);
-            for (const chat of data) {
+            console.log(`[WhatsApp] DEBUG: chats.set data type: ${typeof data}, keys: ${Array.isArray(data) ? 'array' : Object.keys(data)}`);
+            const chats = Array.isArray(data) ? data : (data.chats || []);
+            console.log(`[WhatsApp] Store: chats.set received, ${chats.length} chats`);
+            for (const chat of chats) {
                 store.chats.set(chat.id, chat);
             }
         });
