@@ -74,20 +74,13 @@ export class WhatsAppClient implements IWhatsAppClient {
             auth: state,
             printQRInTerminal: true,
             logger: this.logger,
-            browser: baileys.Browsers.ubuntu('Chrome'),
+            browser: ["Chrome", "Ubuntu", "1.0.0"],
             syncFullHistory: false
         });
 
         store.bind(this.socket.ev);
         this.socket.ev.on('creds.update', saveCreds);
 
-        // Debug all events
-        this.socket.ev.process((events) => {
-            const e = events as any;
-            if (e['chats.set']) console.log(`[WhatsApp] DEBUG: chats.set received`);
-            if (e['contacts.set']) console.log(`[WhatsApp] DEBUG: contacts.set received`);
-            if (e['messages.upsert']) console.log(`[WhatsApp] DEBUG: messages.upsert received`);
-        });        
         this.socket.ev.on('connection.update', (update: Partial<baileys.ConnectionState>) => {
             // Log the update but specifically try to catch the error detail
             console.log('[WhatsApp] Connection update:', JSON.stringify(update, (key, value) => 
@@ -129,8 +122,14 @@ export class WhatsAppClient implements IWhatsAppClient {
     async getChats(): Promise<any[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         
-        // Removed the artificial wait loop. 
-        // If the store is empty, return what we have (even if empty).
+        // Wait for store to be populated if it's empty
+        let attempts = 0;
+        while (store.chats.size === 0 && attempts < 10) {
+            console.log(`[WhatsApp] Store is empty, waiting 1s for chats to populate (attempt ${attempts + 1}/10)...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
+        }
+        
         const chats = store.allChats();
         console.log(`[WhatsApp] getChats returning ${chats.length} chats`);
         return chats;
