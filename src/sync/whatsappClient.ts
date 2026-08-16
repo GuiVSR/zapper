@@ -26,6 +26,7 @@ const store = {
         ev.on('messages.upsert', (m: any) => {
             console.log(`[WhatsApp] Store: messages.upsert received, ${m.messages.length} messages. Type: ${m.type}`);
             for (const msg of m.messages) {
+                console.log(`[WhatsApp] DEBUG: Message shape: ${JSON.stringify(msg, (key, value) => key === 'message' ? Object.keys(value) : value)}`);
                 const chatId = msg.key.remoteJid!;
                 const msgs = store.messages.get(chatId) || [];
                 msgs.push(msg);
