@@ -55,6 +55,12 @@ const store = {
         ev.on('messages.upsert', (m: any) => {
             console.log(`[WhatsApp] Store: messages.upsert received, ${m.messages.length} messages. Type: ${m.type}`);
             for (const msg of m.messages) {
+                // If it's a history sync notification, we don't store it as a regular message
+                if (msg.message?.protocolMessage?.type === 'HISTORY_SYNC_NOTIFICATION') {
+                    console.log(`[WhatsApp] Store: Ignoring HISTORY_SYNC_NOTIFICATION message ${msg.key.id}`);
+                    continue;
+                }
+                
                 console.log(`[WhatsApp] DEBUG: Message structure: ${JSON.stringify(msg, null, 2)}`);
                 const chatId = msg.key.remoteJid!;
                 const msgs = store.messages.get(chatId) || [];
