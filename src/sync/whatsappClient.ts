@@ -22,6 +22,13 @@ const store = {
             // Handle conversation history
             if (data.conversations) {
                 for (const convo of data.conversations) {
+                    // Add chat metadata to store
+                    store.chats.set(convo.id, {
+                        id: convo.id,
+                        name: convo.name || convo.id,
+                        unreadCount: convo.unreadCount || 0
+                    });
+
                     if (convo.messages) {
                         const chatId = convo.id;
                         const msgs = store.messages.get(chatId) || [];
