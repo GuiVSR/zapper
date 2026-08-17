@@ -17,7 +17,7 @@ const store = {
     },
     bind: (ev: any) => {
         ev.on('history-sync', (data: any) => {
-            console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}`);
+            console.log(`[WhatsApp] Store: history-sync received. Type: ${data.syncType}, Chunk: ${data.chunkOrder || 'N/A'}, Progress: ${data.progress || 'N/A'}%`);
             
             // Handle conversation history
             if (data.conversations) {
@@ -26,13 +26,11 @@ const store = {
                         const chatId = convo.id;
                         const msgs = store.messages.get(chatId) || [];
                         for (const m of convo.messages) {
-                            // If m is a wrapper, destructure it. 
-                            // Based on typical Baileys structure, the message might be in m.message
                             const msg = m.message ? m.message : m;
                             msgs.push(msg);
                         }
                         store.messages.set(chatId, msgs);
-                        console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId} from history-sync conversations`);
+                        console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId}. Total: ${msgs.length}`);
                     }
                 }
             }
@@ -45,11 +43,12 @@ const store = {
                     msgs.push(msg);
                     store.messages.set(chatId, msgs);
                 }
+                console.log(`[WhatsApp] Store: Added ${data.messages.length} raw messages`);
             }
             
-            // Handle cursor if present (if we need to fetch more)
+            // Handle cursor
             if (data.cursor) {
-                console.log(`[WhatsApp] Store: history-sync cursor received, further sync might be needed. Cursor:`, JSON.stringify(data.cursor));
+                console.log(`[WhatsApp] Store: History sync cursor received:`, JSON.stringify(data.cursor));
             }
         });
         ev.on('messages.upsert', (m: any) => {
