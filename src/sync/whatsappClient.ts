@@ -10,11 +10,8 @@ const store = {
     chats: new Map<string, any>(),
     messages: new Map<string, any[]>(),
     allChats: () => Array.from(store.chats.values()),
-    loadMessages: (chatId: string, limit: number) => {
-        const msgs = store.messages.get(chatId) || [];
-        console.log(`[WhatsApp] Store: Loading messages for ${chatId}. Total in store: ${msgs.length}`);
-        return msgs.slice(-limit);
-    },
+    // Helper to get all stored messages for a chat
+    getChatMessages: (chatId: string) => store.messages.get(chatId) || [],
     bind: (ev: any) => {
         ev.on('history-sync', (data: any) => {
             console.log(`[WhatsApp] Store: history-sync received. Type: ${data.syncType}, Chunk: ${data.chunkOrder || 'N/A'}, Progress: ${data.progress || 'N/A'}%`);
@@ -190,9 +187,10 @@ export class WhatsAppClient implements IWhatsAppClient {
     async fetchMessages(chatId: string, limit: number): Promise<RawWhatsAppMessage[]> {
         if (!this.socket) throw new Error('WhatsApp client not initialized');
         
-        const allMessages = store.messages.get(chatId) || [];
+        const allMessages = store.getChatMessages(chatId);
         console.log(`[WhatsApp] fetchMessages for ${chatId} (limit: ${limit}) - Total in store: ${allMessages.length}`);
         
+        // Take the last N messages
         const messages = allMessages.slice(-limit);
         
         return messages.map((msg: any): RawWhatsAppMessage => {
