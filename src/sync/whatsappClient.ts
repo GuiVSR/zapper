@@ -25,7 +25,12 @@ const store = {
                         const chatId = convo.id;
                         const msgs = store.messages.get(chatId) || [];
                         for (const m of convo.messages) {
-                            if (m.message) msgs.push(m.message);
+                            // The message is inside m.message
+                            if (m.message) {
+                                // Important: Baileys history sync messages might have a different structure than upsert
+                                // Let's store the whole object to be safe
+                                msgs.push(m.message); 
+                            }
                         }
                         store.messages.set(chatId, msgs);
                         console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId} from history-sync`);
@@ -34,6 +39,7 @@ const store = {
             }
             if (data.messages) {
                 for (const msg of data.messages) {
+                    // msg here is likely already the full message object
                     const chatId = msg.key.remoteJid!;
                     const msgs = store.messages.get(chatId) || [];
                     msgs.push(msg);
