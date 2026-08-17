@@ -18,33 +18,38 @@ const store = {
     bind: (ev: any) => {
         ev.on('history-sync', (data: any) => {
             console.log(`[WhatsApp] Store: history-sync received. Sync type: ${data.syncType}`);
-            // history-sync data often contains 'conversations' which contain messages
+            
+            // Handle conversation history
             if (data.conversations) {
                 for (const convo of data.conversations) {
                     if (convo.messages) {
                         const chatId = convo.id;
                         const msgs = store.messages.get(chatId) || [];
                         for (const m of convo.messages) {
-                            // The message is inside m.message
-                            if (m.message) {
-                                // Important: Baileys history sync messages might have a different structure than upsert
-                                // Let's store the whole object to be safe
-                                msgs.push(m.message); 
-                            }
+                            // If m is a wrapper, destructure it. 
+                            // Based on typical Baileys structure, the message might be in m.message
+                            const msg = m.message ? m.message : m;
+                            msgs.push(msg);
                         }
                         store.messages.set(chatId, msgs);
-                        console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId} from history-sync`);
+                        console.log(`[WhatsApp] Store: Added ${convo.messages.length} messages to ${chatId} from history-sync conversations`);
                     }
                 }
             }
+            
+            // Handle raw messages
             if (data.messages) {
                 for (const msg of data.messages) {
-                    // msg here is likely already the full message object
                     const chatId = msg.key.remoteJid!;
                     const msgs = store.messages.get(chatId) || [];
                     msgs.push(msg);
                     store.messages.set(chatId, msgs);
                 }
+            }
+            
+            // Handle cursor if present (if we need to fetch more)
+            if (data.cursor) {
+                console.log(`[WhatsApp] Store: history-sync cursor received, further sync might be needed. Cursor:`, JSON.stringify(data.cursor));
             }
         });
         ev.on('messages.upsert', (m: any) => {
