@@ -1,27 +1,17 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "es2022",
     "module": "commonjs",
-    "moduleResolution": "node",
-    "lib": ["ES2020", "DOM"],
-    "jsx": "react-jsx",
-    "outDir": "./dist",
-    "rootDir": "./src",
+    "lib": ["es2022", "dom"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "allowJs": true,
-    "noEmit": false,
-    "ignoreDeprecations": "6.0"
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"],
-  "ts-node": {
-    "transpileOnly": true,
-    "compilerOptions": {
-      "module": "commonjs"
-    }
-  }
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }

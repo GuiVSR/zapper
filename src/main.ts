@@ -1,37 +1,36 @@
-import { Message } from "whatsapp-web.js";
-import { WhatsAppClient } from "./client";
+import { createApp } from './server';
+import { LocalDatabase } from './db/localDb';
+import { WhatsAppClient } from './sync/whatsappClient';
+import { SyncEngine } from './sync/syncEngine';
+import { MessageProcessor } from './messaging/messageProcessor';
+import { getLLMClient } from './llm';
+import path from 'path';
 
-// Create client instance with custom handlers
-const client = new WhatsAppClient({
-    headless: true, // Set to false if you want to see the browser
-    onQR: () => {
-        // Custom QR handling (or use default)
-        console.log('QR Code generated - scan with WhatsApp');
-        // You could also generate a file or use a different display method
-    },
-    onReady: () => {
-        console.log('✅ WhatsApp client is ready!');
-        console.log('Listening for messages...\n');
-    },
-    onMessage: (message: Message) => {
-        // Print message details
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log(`📨 New Message:`);
-        console.log(`From: ${message.from}`);
-        console.log(`Author: ${message.author || 'N/A'}`);
-        console.log(`Time: ${new Date().toLocaleString()}`);
-        console.log(`Type: ${message.type}`);
-        console.log(`Content: ${message.body || '[No text content]'}`);
-        
-        if (message.hasMedia) {
-            console.log(`📎 Media attached: ${message.type}`);
-        }
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    },
-    onError: (error: any) => {
-        console.error('Client error:', error);
+const PORT = process.env.PORT || 3000;
+const dbDir = path.join(process.cwd(), 'tmp', 'db');
+const db = new LocalDatabase(dbDir);
+
+let syncEngine: SyncEngine | undefined;
+
+if (process.env.WHATSAPP_ENABLED === 'true') {
+    const whatsappClient = new WhatsAppClient();
+    const llmClient = getLLMClient();
+    const processor = new MessageProcessor(db, llmClient);
+    syncEngine = new SyncEngine(db, whatsappClient, processor);
+
+    whatsappClient.connect().then(() => {
+        console.log('[Zapper] WhatsApp client connected and ready');
+    }).catch((err: any) => {
+        console.error('[Zapper] WhatsApp client failed to connect:', err.message);
+    });
+}
+
+const app = createApp(db, dbDir, syncEngine);
+
+app.listen(PORT, () => {
+    console.log(`[Zapper] API server running on http://localhost:${PORT}`);
+    console.log(`[Zapper] DB path: ${dbDir}`);
+    if (syncEngine) {
+        console.log('[Zapper] WhatsApp sync enabled');
     }
 });
-
-// Start the client
-client.initialize().catch(console.error);

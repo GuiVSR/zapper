@@ -2,9 +2,6 @@
 // src/llm/index.ts — server-only LLM provider factory.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { LLMProvider } from '../constants';
-import { getGroqClient }     from './groq';
-import { getGeminiClient }   from './gemini';
 import { getDeepSeekClient } from './deepseek';
 
 export type LLMClient = {
@@ -13,12 +10,5 @@ export type LLMClient = {
 };
 
 export function getLLMClient(): LLMClient {
-    const provider = (process.env.LLM_PROVIDER?.toLowerCase().trim() ?? 'groq') as LLMProvider;
-
-    switch (provider) {
-        case 'gemini':   return getGeminiClient();
-        case 'deepseek': return getDeepSeekClient();
-        case 'groq':
-        default:         return getGroqClient();
-    }
+    return getDeepSeekClient();
 }

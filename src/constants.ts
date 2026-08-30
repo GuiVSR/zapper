@@ -6,8 +6,6 @@
 export const SERVER_PORT         = 3002;
 
 // ── Frontend ──────────────────────────────────────────────────────────────────
-// Connects directly to the backend server (not through the webpack proxy).
-// Uses the browser's hostname so it works from both localhost and network IPs.
 export const API_BASE_URL = typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:${SERVER_PORT}`
     : `http://127.0.0.1:${SERVER_PORT}`;
@@ -37,14 +35,10 @@ export const DEEPGRAM_BASE_URL   = 'https://api.deepgram.com/v1/listen';
 export const DEEPGRAM_MODEL      = 'nova-2';
 
 // ── LLM — API base URLs ───────────────────────────────────────────────────────
-export const GROQ_BASE_URL       = 'https://api.groq.com/openai/v1';
 export const DEEPSEEK_BASE_URL   = 'https://api.deepseek.com';
-export const GEMINI_BASE_URL     = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // ── LLM — default models ──────────────────────────────────────────────────────
-export const GROQ_DEFAULT_MODEL      = 'llama-3.3-70b-versatile';
 export const DEEPSEEK_DEFAULT_MODEL  = 'deepseek-chat';
-export const GEMINI_DEFAULT_MODEL    = 'gemini-2.5-flash';
 
 // ── LLM — default generation params ──────────────────────────────────────────
 export const DEFAULT_TEMPERATURE     = 0.7;
@@ -76,7 +70,7 @@ Example for maxParts=3: ["Hello! Thanks for reaching out.", "Here is the informa
 }
 
 // ── LLM — provider selection ──────────────────────────────────────────────────
-export type LLMProvider = 'groq' | 'gemini' | 'deepseek';
+export type LLMProvider = 'deepseek';
 
 // ── Image analysis ────────────────────────────────────────────────────────────
 export const IMAGE_ANALYSIS_PROMPT = `* If there is readable text, transcribe it in full in the same language in which the text was written, respecting the sequence.

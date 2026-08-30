@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "command": "bash .claude/scripts/hook-pre-commit.sh",
+        "type": "command"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "bash .claude/scripts/hook-smoke-on-server-change.sh",
+        "type": "command"
+      },
+      {
+        "matcher": "Edit|Write",
+        "command": "bash .claude/scripts/hook-curl-runbook-check.sh",
+        "type": "command"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "command": "bash .claude/scripts/hook-log-executions.sh",
+        "type": "command"
+      }
+    ]
+  }
+}
